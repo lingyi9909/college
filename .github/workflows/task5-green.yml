@@ -15,7 +15,7 @@ jobs:
       - name: Checkout exact Task 5 candidate
         uses: actions/checkout@v4
         with:
-          ref: 5a8d779574499b2c5145ee18d7969442ec3f71dc
+          ref: 0bf7b2b44a956e8c37a16b49cf1bdd720516c1b7
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
