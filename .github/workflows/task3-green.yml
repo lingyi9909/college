@@ -15,7 +15,7 @@ jobs:
       - name: Checkout exact Task 3 candidate
         uses: actions/checkout@v4
         with:
-          ref: e851e3ff4948e5073ed9d1db25028ba92777a39c
+          ref: 317bd6473da3b2303ac209b2314d128a2cbbddbd
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
