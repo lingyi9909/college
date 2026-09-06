@@ -1,4 +1,4 @@
-name: Task 3 Ruff Diagnostic
+name: Task 3 Exact Candidate Gate
 
 on:
   push:
@@ -9,18 +9,24 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  verify:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout exact Task 3 candidate
         uses: actions/checkout@v4
         with:
-          ref: 493c2d6b66716fec095d2ab7a349bcd68c63bcf4
+          ref: e851e3ff4948e5073ed9d1db25028ba92777a39c
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install Ruff
-        run: python -m pip install 'ruff>=0.8,<1'
-      - name: Show Ruff import diff
-        run: ruff check src/college_builder/storage/parquet.py tests/unit/storage/test_state.py --select I --diff
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: pytest tests/unit/storage -q
+        run: pytest tests/unit/storage -q
+      - name: ruff check src tests
+        run: ruff check src tests
+      - name: mypy src
+        run: mypy src
