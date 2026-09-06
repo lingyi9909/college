@@ -246,8 +246,8 @@ class StackMathQAAdapter:
     @staticmethod
     def _answer_identity(meta: Mapping[str, JsonLike]) -> int:
         answer_id = meta.get("answer_id")
-        if isinstance(answer_id, bool) or not isinstance(answer_id, int) or answer_id <= 0:
-            raise ValueError("StackMathQA meta.answer_id must be a positive integer")
+        if isinstance(answer_id, bool) or not isinstance(answer_id, int) or answer_id < 0:
+            raise ValueError("StackMathQA meta.answer_id must be a non-negative integer")
         return answer_id
 
     @staticmethod
