@@ -104,13 +104,22 @@ def _unresolved_evidence(
         ("answer", answer),
         ("analysis", analysis),
     ):
-        for item in result.unresolved_math:
+        for math_item in result.unresolved_math:
             unresolved.append(
                 {
                     "field": field_name,
-                    "code": item["code"],
-                    "reason": item["reason"],
-                    "source_mathml": item["source_mathml"],
+                    "code": math_item["code"],
+                    "reason": math_item["reason"],
+                    "source_mathml": math_item["source_mathml"],
+                }
+            )
+        for structure_item in result.unresolved_structure:
+            unresolved.append(
+                {
+                    "field": field_name,
+                    "code": structure_item["code"],
+                    "reason": structure_item["reason"],
+                    "source_markup": structure_item["source_markup"],
                 }
             )
     return unresolved
