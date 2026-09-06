@@ -1,0 +1,64 @@
+profile: university_stem_v1
+contract_version: question_record_v1
+md5_version: slim_md5_v1
+
+text_grade:
+  allowed:
+    - 大学
+
+text_grade_level:
+  allowed:
+    - 本科一年级
+    - 本科二年级
+    - 本科三年级
+    - 本科四年级
+    - 本科
+    - 硕士
+    - 博士
+    - 研究生
+    - 大学未知
+
+text_course:
+  allowed:
+    - 数学
+    - 统计学
+    - 物理
+    - 化学
+    - 计算机
+    - 电子信息
+    - 电气工程
+    - 自动化
+    - 机械工程
+    - 材料科学
+    - 土木工程
+    - 生物科学
+    - 其他理工
+    - 未知
+
+entrance_exam_type:
+  allowed:
+    - 未知
+
+question_type:
+  allowed:
+    - 判断题
+    - 选择题
+    - 填空题
+    - 问答题
+    - 其他题型
+    - 未知
+
+answer_analysis:
+  required: true
+  reject_values:
+    - ""
+    - 略
+
+language:
+  format: iso_639_1_lowercase
+
+static_info:
+  type: json_object
+  required_identity:
+    contract_version: question_record_v1
+    profile: university_stem_v1
