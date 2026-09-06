@@ -1,0 +1,22 @@
+name: Task 5 Answer ID Zero RED
+
+on:
+  push:
+    branches:
+      - verification/task5-answer-id-zero-red
+
+permissions:
+  contents: read
+
+jobs:
+  red:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Reproduce official answer_id zero blocker
+        run: pytest tests/unit/source/test_stackmathqa.py tests/unit/source/test_stackmathqa_answer_id.py -q
