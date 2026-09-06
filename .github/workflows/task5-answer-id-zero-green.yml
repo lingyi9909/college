@@ -1,4 +1,4 @@
-name: Task 5 Answer ID Zero Gate
+name: Task 5 Answer ID Zero Candidate Gate
 
 on:
   push:
@@ -12,7 +12,10 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exact Task 5 candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 22280d681d9b7e746b7b74e91f0fee85249eaa80
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
