@@ -1,0 +1,31 @@
+name: Task 5 Official Schema Gate
+
+on:
+  push:
+    branches:
+      - verification/task5-official-schema-green
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact Task 5 candidate
+        uses: actions/checkout@v4
+        with:
+          ref: a64b04b1495aa9a5ebd2fbd15d6e0e5fc413ded9
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Task 5 pytest
+        run: pytest tests/unit/source/test_stackmathqa.py -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
