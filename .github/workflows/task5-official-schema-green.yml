@@ -1,4 +1,4 @@
-name: Task 5 Official Schema Gate
+name: Task 5 Develop Exact HEAD Gate
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout exact Task 5 candidate
+      - name: Checkout develop exact Task 5 HEAD
         uses: actions/checkout@v4
         with:
           ref: a64b04b1495aa9a5ebd2fbd15d6e0e5fc413ded9
