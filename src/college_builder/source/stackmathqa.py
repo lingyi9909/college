@@ -11,7 +11,7 @@ from typing import Annotated, Literal, cast
 from urllib.parse import urlparse
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from college_builder.domain.source import JsonLike, RawSourceRecord
 from college_builder.source.base import AdapterCheckpoint, SourceDescriptor
@@ -24,6 +24,12 @@ PILOT_STRATA: tuple[StackMathQASite, ...] = (
     "statistics",
     "physics",
 )
+OFFICIAL_SOURCE_FILES: dict[str, tuple[StackMathQASite, str]] = {
+    "math.stackexchange.com.jsonl": ("math", "math.stackexchange.com"),
+    "mathoverflow.net.jsonl": ("mathoverflow", "mathoverflow.net"),
+    "stats.stackexchange.com.jsonl": ("statistics", "stats.stackexchange.com"),
+    "physics.stackexchange.com.jsonl": ("physics", "physics.stackexchange.com"),
+}
 
 
 class StackMathQAConfig(BaseModel):
@@ -38,29 +44,13 @@ class StackMathQAConfig(BaseModel):
 
 
 class StackMathQARow(BaseModel):
-    """Typed provider row used only at the StackMathQA adapter boundary."""
+    """Official stackmathqafull-1q1a row at the provider boundary."""
 
-    model_config = ConfigDict(frozen=True, extra="allow", strict=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    question_id: str | int
-    answer_id: str | int
-    site: StackMathQASite
-    question_body: str
-    answer_body: str
-    tags: tuple[str, ...]
-    question_score: int
-    answer_score: int
-    accepted_answer: bool
-    source_url: NonEmptyStr
-    question_created_at: str | None = None
-    answer_created_at: str | None = None
-
-    @field_validator("tags", mode="before")
-    @classmethod
-    def json_tags_to_tuple(cls, value: object) -> object:
-        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-            raise ValueError("StackMathQA tags must be a JSON array of strings")
-        return tuple(value)
+    Q: str
+    A: str
+    meta: dict[str, JsonLike]
 
 
 class StackMathQAAdapter:
@@ -74,6 +64,7 @@ class StackMathQAAdapter:
 
     def discover(self, config: object) -> Iterable[SourceDescriptor]:
         validated = StackMathQAConfig.model_validate(config).model_copy(deep=True)
+        self._official_source_identity(validated.data_file)
         descriptor = SourceDescriptor(
             source_type="dataset",
             source_dataset="stackmathqa",
@@ -148,64 +139,138 @@ class StackMathQAAdapter:
         raw_row: Mapping[str, JsonLike],
     ) -> RawSourceRecord:
         row = StackMathQARow.model_validate(raw_row)
-        source_id = f"{row.site}:{row.question_id}:{row.answer_id}"
+        source_site, expected_host = self._official_source_identity(descriptor.locator)
+        source_url = self._required_source_url(row.meta)
+        self._validate_source_host(source_site, expected_host, source_url)
+        question_id = self._question_identity(source_url)
+        answer_id = self._answer_identity(row.meta)
+        source_id = f"{source_site}:{question_id}:{answer_id}"
         raw_sha256 = self._raw_sha256(raw_row)
+        metadata = self._metadata(row.meta, source_site, descriptor, row_offset)
+
         return RawSourceRecord.model_validate(
             {
                 "record_id": self._record_id(source_id),
                 "source_type": "dataset",
                 "source_dataset": "stackmathqa",
                 "source_id": source_id,
-                "source_url": row.source_url,
-                "raw_question": row.question_body,
+                "source_url": source_url,
+                "raw_question": row.Q,
                 "raw_answer": "",
-                "raw_analysis": row.answer_body,
+                "raw_analysis": row.A,
                 "raw_payload": raw_row,
-                "metadata": {
-                    "source_site": row.site,
-                    "question_id": row.question_id,
-                    "answer_id": row.answer_id,
-                    "tags": list(row.tags),
-                    "question_score": row.question_score,
-                    "answer_score": row.answer_score,
-                    "accepted_answer": row.accepted_answer,
-                    "question_created_at": row.question_created_at,
-                    "answer_created_at": row.answer_created_at,
-                    "acquisition": {
-                        "adapter": "stackmathqa",
-                        "row_offset": row_offset,
-                        "source_revision": descriptor.source_revision,
-                        "source_descriptor": descriptor.model_dump(mode="json"),
-                    },
-                },
+                "metadata": metadata,
                 "license_metadata": config.license_metadata,
                 "raw_sha256": raw_sha256,
             }
         )
 
     def _load_rows(self, locator: str) -> Iterator[Mapping[str, JsonLike]]:
-        text = self._load_text(locator)
-        try:
-            parsed = json.loads(text, parse_constant=self._reject_json_constant)
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise ValueError("invalid StackMathQA JSON source") from exc
-        if not isinstance(parsed, list):
-            raise ValueError("StackMathQA source must be a JSON array")
-        for row_offset, value in enumerate(parsed):
-            if not isinstance(value, dict):
-                raise ValueError(f"StackMathQA row {row_offset} must be an object")
-            yield cast(dict[str, JsonLike], value)
+        for line_number, line in enumerate(self._iter_lines(locator), start=1):
+            if not line.strip():
+                continue
+            try:
+                parsed = json.loads(line, parse_constant=self._reject_json_constant)
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise ValueError(
+                    f"invalid StackMathQA JSONL at line {line_number}"
+                ) from exc
+            if not isinstance(parsed, dict):
+                raise ValueError(
+                    f"StackMathQA JSONL line {line_number} must be an object"
+                )
+            yield cast(dict[str, JsonLike], parsed)
 
     @staticmethod
-    def _load_text(locator: str) -> str:
+    def _iter_lines(locator: str) -> Iterator[str]:
         parsed = urlparse(locator)
         if parsed.scheme in {"http", "https"}:
-            response = httpx.get(locator, timeout=30.0, follow_redirects=True)
-            response.raise_for_status()
-            return response.text
+            with httpx.stream(
+                "GET", locator, timeout=30.0, follow_redirects=True
+            ) as response:
+                response.raise_for_status()
+                yield from response.iter_lines()
+            return
         if parsed.scheme:
             raise ValueError(f"unsupported StackMathQA locator scheme: {parsed.scheme}")
-        return Path(locator).read_text(encoding="utf-8")
+        with Path(locator).open("r", encoding="utf-8") as source_file:
+            yield from source_file
+
+    @staticmethod
+    def _official_source_identity(locator: str) -> tuple[StackMathQASite, str]:
+        filename = Path(urlparse(locator).path).name
+        identity = OFFICIAL_SOURCE_FILES.get(filename)
+        if identity is None:
+            raise ValueError(
+                f"unrecognized official StackMathQA source file: {filename or locator}"
+            )
+        return identity
+
+    @staticmethod
+    def _required_source_url(meta: Mapping[str, JsonLike]) -> str:
+        source_url = meta.get("url")
+        if not isinstance(source_url, str) or not source_url:
+            raise ValueError("StackMathQA meta.url is required for source identity")
+        return source_url
+
+    @staticmethod
+    def _validate_source_host(
+        source_site: StackMathQASite,
+        expected_host: str,
+        source_url: str,
+    ) -> None:
+        actual_host = (urlparse(source_url).hostname or "").lower()
+        if actual_host != expected_host:
+            raise ValueError(
+                f"source site {source_site} does not match StackMathQA meta.url host "
+                f"{actual_host or '<missing>'}"
+            )
+
+    @staticmethod
+    def _question_identity(source_url: str) -> str:
+        path_parts = [part for part in urlparse(source_url).path.split("/") if part]
+        for marker in ("questions", "q"):
+            if marker not in path_parts:
+                continue
+            marker_index = path_parts.index(marker)
+            if marker_index + 1 >= len(path_parts):
+                break
+            question_id = path_parts[marker_index + 1]
+            if question_id.isdigit() and int(question_id) > 0:
+                return question_id
+            break
+        raise ValueError(
+            f"cannot derive stable StackMathQA question identity from meta.url: {source_url}"
+        )
+
+    @staticmethod
+    def _answer_identity(meta: Mapping[str, JsonLike]) -> int:
+        answer_id = meta.get("answer_id")
+        if isinstance(answer_id, bool) or not isinstance(answer_id, int) or answer_id <= 0:
+            raise ValueError("StackMathQA meta.answer_id must be a positive integer")
+        return answer_id
+
+    @staticmethod
+    def _metadata(
+        source_meta: Mapping[str, JsonLike],
+        source_site: StackMathQASite,
+        descriptor: SourceDescriptor,
+        row_offset: int,
+    ) -> dict[str, JsonLike]:
+        for reserved_key in ("source_site", "acquisition"):
+            if reserved_key in source_meta:
+                raise ValueError(
+                    f"StackMathQA meta contains reserved provenance key: {reserved_key}"
+                )
+        metadata = dict(source_meta)
+        metadata["source_site"] = source_site
+        metadata["acquisition"] = {
+            "adapter": "stackmathqa",
+            "row_offset": row_offset,
+            "source_revision": descriptor.source_revision,
+            "source_descriptor": descriptor.model_dump(mode="json"),
+        }
+        return metadata
 
     @staticmethod
     def _reject_json_constant(value: str) -> None:

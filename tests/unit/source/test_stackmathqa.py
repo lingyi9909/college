@@ -11,19 +11,33 @@ from college_builder.domain.source import RawSourceRecord
 from college_builder.source.base import SourceAdapter
 from college_builder.source.stackmathqa import StackMathQAAdapter, stratified_sample
 
-GOLDEN = Path("tests/golden/stackmathqa_mapping.json")
+GOLDEN_DIR = Path("tests/golden/stackmathqa")
+SITE_CASES = (
+    ("math.stackexchange.com.jsonl", "math", "1001", 2001),
+    ("mathoverflow.net.jsonl", "mathoverflow", "1002", 3001),
+    ("stats.stackexchange.com.jsonl", "statistics", "1003", 4001),
+    ("physics.stackexchange.com.jsonl", "physics", "1004", 5001),
+)
 
 
-def _config() -> dict[str, object]:
+def _config(data_file: Path) -> dict[str, object]:
     return {
-        "data_file": str(GOLDEN),
-        "revision": "stackmathqa-fixture-v1",
+        "data_file": str(data_file),
+        "revision": "stackmathqafull-1q1a-fixture-v1",
         "dataset_url": "https://huggingface.co/datasets/math-ai/StackMathQA",
         "license_metadata": {
-            "declared": "CC-BY-SA",
+            "declared": "CC-BY-4.0",
             "status": "UNREVIEWED",
         },
     }
+
+
+def _jsonl_rows(path: Path) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def _canonical_sha256(value: object) -> str:
@@ -63,67 +77,151 @@ def _sample_record(site: str, index: int) -> RawSourceRecord:
     )
 
 
-def test_stackmathqa_adapter_maps_four_approved_source_sites_losslessly() -> None:
+@pytest.mark.parametrize(("filename", "site", "question_id", "answer_id"), SITE_CASES)
+def test_official_stackmathqa_source_files_map_q_a_meta_losslessly(
+    filename: str,
+    site: str,
+    question_id: str,
+    answer_id: int,
+) -> None:
+    path = GOLDEN_DIR / filename
     adapter = StackMathQAAdapter()
     assert isinstance(adapter, SourceAdapter)
 
-    descriptors = tuple(adapter.discover(_config()))
-    assert len(descriptors) == 1
-    descriptor = descriptors[0]
-    assert descriptor.source_dataset == "stackmathqa"
-    assert descriptor.source_revision == "stackmathqa-fixture-v1"
+    descriptor = tuple(adapter.discover(_config(path)))[0]
+    record = list(adapter.acquire(descriptor))[0]
+    official_row = _jsonl_rows(path)[0]
+    meta = official_row["meta"]
+    assert isinstance(meta, dict)
 
-    records = list(adapter.acquire(descriptor))
-    assert [record.metadata["source_site"] for record in records] == [
-        "math",
-        "mathoverflow",
-        "statistics",
-        "physics",
-    ]
-
-    golden_rows = json.loads(GOLDEN.read_text(encoding="utf-8"))
-    first = records[0]
-    dumped = first.model_dump(mode="json")
-    assert first.source_id == "math:1001:2001"
-    assert first.source_url == "https://math.stackexchange.com/questions/1001"
-    assert first.raw_question == "  Let $A$ be a 2x2 matrix. Find its determinant.  "
-    assert first.raw_answer == ""
-    assert first.raw_analysis == golden_rows[0]["answer_body"]
-    assert dumped["raw_payload"] == golden_rows[0]
-    assert dumped["metadata"]["tags"] == ["linear-algebra", "matrices"]
-    assert dumped["metadata"]["question_score"] == 18
-    assert dumped["metadata"]["answer_score"] == 27
-    assert dumped["metadata"]["accepted_answer"] is True
-    assert dumped["metadata"]["question_created_at"] == "2020-01-02T03:04:05Z"
-    assert dumped["metadata"]["answer_created_at"] == "2020-01-02T04:05:06Z"
+    dumped = record.model_dump(mode="json")
+    assert record.source_id == f"{site}:{question_id}:{answer_id}"
+    assert record.source_url == meta["url"]
+    assert record.raw_question == official_row["Q"]
+    assert record.raw_answer == ""
+    assert record.raw_analysis == official_row["A"]
+    assert dumped["raw_payload"] == official_row
+    assert dumped["metadata"]["source_site"] == site
+    for key, value in meta.items():
+        assert dumped["metadata"][key] == value
     assert dumped["license_metadata"] == {
-        "declared": "CC-BY-SA",
+        "declared": "CC-BY-4.0",
         "status": "UNREVIEWED",
     }
-    assert first.raw_sha256 == _canonical_sha256(golden_rows[0])
+    assert record.raw_sha256 == _canonical_sha256(official_row)
     assert "university_level" not in dumped["metadata"]
     assert "course" not in dumped["metadata"]
     assert "quality" not in dumped["metadata"]
 
 
-def test_stackmathqa_long_answer_remains_source_analysis_for_task10() -> None:
+def test_official_jsonl_loader_reads_multiple_lines() -> None:
+    path = GOLDEN_DIR / "math.stackexchange.com.jsonl"
     adapter = StackMathQAAdapter()
-    descriptor = tuple(adapter.discover(_config()))[0]
+    descriptor = tuple(adapter.discover(_config(path)))[0]
 
     records = list(adapter.acquire(descriptor))
 
-    for record in records:
-        source_answer_body = record.model_dump(mode="json")["raw_payload"]["answer_body"]
-        assert record.raw_answer == ""
-        assert record.raw_analysis == source_answer_body
-        assert record.raw_analysis
+    assert [record.source_id for record in records] == [
+        "math:1001:2001",
+        "math:1001:2002",
+    ]
+    assert adapter.checkpoint().next_row_offset == 2
+    assert adapter.checkpoint().source_revision == "stackmathqafull-1q1a-fixture-v1"
+
+
+def test_official_q_a_meta_remain_raw_provenance_and_long_a_is_analysis() -> None:
+    path = GOLDEN_DIR / "physics.stackexchange.com.jsonl"
+    official_row = _jsonl_rows(path)[0]
+    adapter = StackMathQAAdapter()
+    descriptor = tuple(adapter.discover(_config(path)))[0]
+
+    record = list(adapter.acquire(descriptor))[0]
+    dumped = record.model_dump(mode="json")
+
+    assert dumped["raw_payload"] == official_row
+    assert record.raw_question == official_row["Q"]
+    assert record.raw_analysis == official_row["A"]
+    assert record.raw_answer == ""
+
+
+def test_source_site_is_derived_from_official_filename_not_meta_labels(tmp_path: Path) -> None:
+    path = tmp_path / "physics.stackexchange.com.jsonl"
+    row = _jsonl_rows(GOLDEN_DIR / "physics.stackexchange.com.jsonl")[0]
+    meta = row["meta"]
+    assert isinstance(meta, dict)
+    meta["tags"] = ["mathematics", "algebra"]
+    meta["course"] = "MATHEMATICS"
+    path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    adapter = StackMathQAAdapter()
+    descriptor = tuple(adapter.discover(_config(path)))[0]
+    record = list(adapter.acquire(descriptor))[0]
+
+    assert record.metadata["source_site"] == "physics"
+
+
+def test_source_site_meta_url_mismatch_fails_closed(tmp_path: Path) -> None:
+    path = tmp_path / "physics.stackexchange.com.jsonl"
+    row = _jsonl_rows(GOLDEN_DIR / "physics.stackexchange.com.jsonl")[0]
+    meta = row["meta"]
+    assert isinstance(meta, dict)
+    meta["url"] = "https://math.stackexchange.com/questions/1004/wrong-site"
+    path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    adapter = StackMathQAAdapter()
+    descriptor = tuple(adapter.discover(_config(path)))[0]
+
+    with pytest.raises(ValueError, match=r"source site.*meta\.url"):
+        list(adapter.acquire(descriptor))
+
+
+def test_missing_official_answer_identity_fails_closed(tmp_path: Path) -> None:
+    path = tmp_path / "math.stackexchange.com.jsonl"
+    row = _jsonl_rows(GOLDEN_DIR / "math.stackexchange.com.jsonl")[0]
+    meta = row["meta"]
+    assert isinstance(meta, dict)
+    meta.pop("answer_id")
+    path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    adapter = StackMathQAAdapter()
+    descriptor = tuple(adapter.discover(_config(path)))[0]
+
+    with pytest.raises(ValueError, match=r"answer_id"):
+        list(adapter.acquire(descriptor))
+
+
+def test_unparseable_question_identity_fails_closed(tmp_path: Path) -> None:
+    path = tmp_path / "math.stackexchange.com.jsonl"
+    row = _jsonl_rows(GOLDEN_DIR / "math.stackexchange.com.jsonl")[0]
+    meta = row["meta"]
+    assert isinstance(meta, dict)
+    meta["url"] = "https://math.stackexchange.com/users/1001/not-a-question"
+    path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    adapter = StackMathQAAdapter()
+    descriptor = tuple(adapter.discover(_config(path)))[0]
+
+    with pytest.raises(ValueError, match=r"question identity"):
+        list(adapter.acquire(descriptor))
+
+
+def test_unrecognized_source_filename_fails_closed(tmp_path: Path) -> None:
+    path = tmp_path / "unknown.stackexchange.com.jsonl"
+    row = _jsonl_rows(GOLDEN_DIR / "math.stackexchange.com.jsonl")[0]
+    path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    adapter = StackMathQAAdapter()
+
+    with pytest.raises(ValueError, match=r"official StackMathQA source file"):
+        tuple(adapter.discover(_config(path)))
 
 
 def test_stackmathqa_mapping_and_identity_are_stable_across_runs() -> None:
+    path = GOLDEN_DIR / "math.stackexchange.com.jsonl"
     first_adapter = StackMathQAAdapter()
     second_adapter = StackMathQAAdapter()
-    first_descriptor = tuple(first_adapter.discover(_config()))[0]
-    second_descriptor = tuple(second_adapter.discover(_config()))[0]
+    first_descriptor = tuple(first_adapter.discover(_config(path)))[0]
+    second_descriptor = tuple(second_adapter.discover(_config(path)))[0]
 
     first = list(first_adapter.acquire(first_descriptor))
     second = list(second_adapter.acquire(second_descriptor))
@@ -131,8 +229,6 @@ def test_stackmathqa_mapping_and_identity_are_stable_across_runs() -> None:
     assert [record.model_dump(mode="json") for record in first] == [
         record.model_dump(mode="json") for record in second
     ]
-    assert first_adapter.checkpoint().next_row_offset == 4
-    assert first_adapter.checkpoint().source_revision == "stackmathqa-fixture-v1"
 
 
 def test_stratified_sample_returns_exact_source_site_quotas_deterministically() -> None:
