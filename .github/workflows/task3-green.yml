@@ -1,4 +1,4 @@
-name: Task 3 Exact Candidate Gate
+name: Task 3 Develop Exact HEAD Final Gate
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout exact Task 3 candidate
+      - name: Checkout develop exact Task 3 HEAD
         uses: actions/checkout@v4
         with:
           ref: 317bd6473da3b2303ac209b2314d128a2cbbddbd
