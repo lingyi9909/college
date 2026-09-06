@@ -15,7 +15,7 @@ jobs:
       - name: Checkout exact Task 7 blocker-fix candidate
         uses: actions/checkout@v4
         with:
-          ref: b7a4313bcc76d99c487ecba703dcc7110c6eec2f
+          ref: 6738b3db951ba5c8b35a8a9e2670223d0f4ea254
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
