@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://cnx.rice.edu/cnxml" id="osbooks-university-physics-volume-1">
+  <title>University Physics Volume 1</title>
+  <content>
+    <section id="section-1">
+      <title>Source-native exercises</title>
+      <exercise id="ex-1">
+        <problem>
+          <para>Find x if <emphasis effect="italics">2x = 8</emphasis>.</para>
+        </problem>
+        <solution>
+          <para>The source solution is x = 4; no wording is added.</para>
+        </solution>
+      </exercise>
+      <exercise id="ex-2">
+        <problem>
+          <para>A body moves at 3 m/s for 4 s. Find the displacement.</para>
+        </problem>
+        <solution>
+          <para>The source solution is 12 m from displacement = velocity × time.</para>
+        </solution>
+      </exercise>
+    </section>
+  </content>
+</document>
