@@ -1,0 +1,31 @@
+name: Task 5 RED
+
+on:
+  push:
+    branches:
+      - verification/task5-red
+
+permissions:
+  contents: read
+
+jobs:
+  red:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Verify Task 5 tests fail before implementation
+        shell: bash
+        run: |
+          set +e
+          pytest tests/unit/source/test_stackmathqa.py -q
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "Expected Task 5 tests to fail before implementation."
+            exit 2
+          fi
+          exit 1
