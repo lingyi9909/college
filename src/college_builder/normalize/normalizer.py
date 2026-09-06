@@ -113,4 +113,13 @@ def _unresolved_evidence(
                     "source_mathml": item["source_mathml"],
                 }
             )
+        for item in result.unresolved_structure:
+            unresolved.append(
+                {
+                    "field": field_name,
+                    "code": item["code"],
+                    "reason": item["reason"],
+                    "source_markup": item["source_markup"],
+                }
+            )
     return unresolved
