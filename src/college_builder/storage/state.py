@@ -16,8 +16,9 @@ class RunStage(StrEnum):
     CLASSIFIED = "CLASSIFIED"
     ANSWER_VALIDATED = "ANSWER_VALIDATED"
     ANALYSIS_VALIDATED = "ANALYSIS_VALIDATED"
-    DEDUPED = "DEDUPED"
+    EARLY_DEDUPED = "EARLY_DEDUPED"
     VERIFIED = "VERIFIED"
+    FINAL_DEDUPED = "FINAL_DEDUPED"
     ACCEPTED = "ACCEPTED"
     REJECTED = "REJECTED"
 
@@ -28,8 +29,9 @@ _LINEAR_STAGES = (
     RunStage.CLASSIFIED,
     RunStage.ANSWER_VALIDATED,
     RunStage.ANALYSIS_VALIDATED,
-    RunStage.DEDUPED,
+    RunStage.EARLY_DEDUPED,
     RunStage.VERIFIED,
+    RunStage.FINAL_DEDUPED,
 )
 _TERMINAL_STAGES = frozenset({RunStage.ACCEPTED, RunStage.REJECTED})
 _STAGE_ORDER = {
@@ -106,8 +108,10 @@ class RunStateStore:
         current = self.current_stage(run_id, record_id)
         if current is None:
             return RunStage.ACQUIRED
-        if current in _TERMINAL_STAGES or current is RunStage.VERIFIED:
+        if current in _TERMINAL_STAGES:
             return None
+        if current is RunStage.FINAL_DEDUPED:
+            return RunStage.ACCEPTED
         return _NEXT_STAGE[current]
 
     def is_completed(
@@ -165,11 +169,16 @@ class RunStateStore:
                         f"{stage.value} already completed with a different fingerprint"
                     )
 
-                if current is RunStage.VERIFIED:
-                    if stage not in _TERMINAL_STAGES:
-                        raise ValueError("expected ACCEPTED or REJECTED after VERIFIED")
+                if stage is RunStage.REJECTED:
+                    if current is None:
+                        raise ValueError("REJECTED requires a completed non-terminal gate")
                 else:
-                    expected = RunStage.ACQUIRED if current is None else _NEXT_STAGE[current]
+                    if current is None:
+                        expected = RunStage.ACQUIRED
+                    elif current is RunStage.FINAL_DEDUPED:
+                        expected = RunStage.ACCEPTED
+                    else:
+                        expected = _NEXT_STAGE[current]
                     if stage is not expected:
                         raise ValueError(
                             f"invalid transition: expected {expected.value}, got {stage.value}"

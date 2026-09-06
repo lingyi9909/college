@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -26,6 +27,12 @@ def _canonical_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _batch_fingerprint(rows: Sequence[object]) -> str:
+    canonical_rows = sorted(_canonical_json(row) for row in rows)
+    payload = _canonical_json(canonical_rows).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 class ParquetStageStore:
     """Persist stage rows into deterministic Hive-style Parquet partitions."""
 
@@ -38,12 +45,14 @@ class ParquetStageStore:
         run_id: str,
         stage: str,
         source_dataset: str,
+        batch_id: str,
         records: Sequence[RawSourceRecord],
     ) -> Path:
-        """Atomically replace one raw-record partition file."""
+        """Atomically persist one deterministic batch without overwriting other batches."""
         _validate_partition_value("run_id", run_id)
         _validate_partition_value("stage", stage)
         _validate_partition_value("source_dataset", source_dataset)
+        _validate_partition_value("batch_id", batch_id)
         if not records:
             raise ValueError("records must be non-empty")
 
@@ -78,10 +87,17 @@ class ParquetStageStore:
             / f"source_dataset={source_dataset}"
         )
         partition.mkdir(parents=True, exist_ok=True)
-        final_path = partition / "part-00000.parquet"
+        final_path = partition / f"part-{batch_id}.parquet"
+        incoming_fingerprint = _batch_fingerprint(rows)
+
+        if final_path.exists():
+            existing_rows = pq.read_table(str(final_path)).to_pylist()
+            if _batch_fingerprint(existing_rows) == incoming_fingerprint:
+                return final_path
+            raise ValueError(f"batch_id {batch_id} already exists with different content")
 
         file_descriptor, temp_name = tempfile.mkstemp(
-            prefix=".part-",
+            prefix=f".part-{batch_id}-",
             suffix=".tmp",
             dir=partition,
         )
