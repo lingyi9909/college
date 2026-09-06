@@ -1,4 +1,4 @@
-name: Task 7 Blockers Candidate Gate
+name: Task 7 Develop Exact HEAD Blocker Gate
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout exact Task 7 blocker-fix candidate
+      - name: Checkout develop exact Task 7 HEAD
         uses: actions/checkout@v4
         with:
           ref: 6738b3db951ba5c8b35a8a9e2670223d0f4ea254
