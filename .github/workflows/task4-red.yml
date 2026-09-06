@@ -1,0 +1,30 @@
+name: Task 4 RED
+
+on:
+  push:
+    branches:
+      - verification/task4-red
+
+permissions:
+  contents: read
+
+jobs:
+  red:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Verify Task 4 tests fail before implementation
+        run: |
+          set +e
+          pytest tests/unit/source/test_base.py tests/unit/source/test_huggingface.py -q
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "Expected Task 4 tests to fail before implementation."
+            exit 2
+          fi
+          exit 1
