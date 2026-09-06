@@ -1,0 +1,74 @@
+[
+  {
+    "name": "html_paragraphs",
+    "input": "<p>Alpha 2x+3=7.</p><p>Beta &amp; Gamma.</p>",
+    "expected": "Alpha 2x+3=7.\n\nBeta & Gamma.",
+    "images": []
+  },
+  {
+    "name": "unordered_list",
+    "input": "<ul><li>first</li><li>second</li></ul>",
+    "expected": "- first\n- second",
+    "images": []
+  },
+  {
+    "name": "ordered_list",
+    "input": "<ol><li>one</li><li>two</li></ol>",
+    "expected": "1. one\n2. two",
+    "images": []
+  },
+  {
+    "name": "blockquote",
+    "input": "<blockquote><p>Keep 7 &lt; 9.</p></blockquote>",
+    "expected": "> Keep 7 < 9.",
+    "images": []
+  },
+  {
+    "name": "inline_code",
+    "input": "<p>Use <code>x^2 + 1</code>.</p>",
+    "expected": "Use `x^2 + 1`.",
+    "images": []
+  },
+  {
+    "name": "pre_block",
+    "input": "<pre>for i in range(2):\r\n    print(i)</pre>",
+    "expected": "```\nfor i in range(2):\n    print(i)\n```",
+    "images": []
+  },
+  {
+    "name": "inline_mathml",
+    "input": "<p>Compute <math><msup><mi>x</mi><mn>2</mn></msup></math>.</p>",
+    "expected": "Compute $x^{2}$.",
+    "images": []
+  },
+  {
+    "name": "display_mathml",
+    "input": "<math display=\"block\"><mfrac><mn>1</mn><mn>2</mn></mfrac></math>",
+    "expected": "$$\\frac{1}{2}$$",
+    "images": []
+  },
+  {
+    "name": "escaped_entities",
+    "input": "<p>A &amp; B &lt; C &gt; D</p>",
+    "expected": "A & B < C > D",
+    "images": []
+  },
+  {
+    "name": "link",
+    "input": "<p>See <a href=\"https://example.test/q?id=7&amp;x=2\">source</a>.</p>",
+    "expected": "See [source](https://example.test/q?id=7&x=2).",
+    "images": []
+  },
+  {
+    "name": "image",
+    "input": "<p><img src=\"https://example.test/a.png\" alt=\"diagram 7\"></p>",
+    "expected": "![diagram 7](https://example.test/a.png)",
+    "images": ["https://example.test/a.png"]
+  },
+  {
+    "name": "crlf",
+    "input": "line 1\r\nline 2\rline 3",
+    "expected": "line 1\nline 2\nline 3",
+    "images": []
+  }
+]
