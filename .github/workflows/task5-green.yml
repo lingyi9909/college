@@ -1,0 +1,31 @@
+name: Task 5 Candidate Gate
+
+on:
+  push:
+    branches:
+      - verification/task5-green
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact Task 5 candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 2c2480c4b6ee7ae77466012d8ae83daf7689ebd6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Task 5 pytest
+        run: pytest tests/unit/source/test_stackmathqa.py -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
