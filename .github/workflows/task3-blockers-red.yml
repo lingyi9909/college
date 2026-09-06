@@ -1,0 +1,35 @@
+name: Task 3 Blocker RED
+
+on:
+  push:
+    branches:
+      - verification/task3-blockers-red
+
+permissions:
+  contents: read
+
+jobs:
+  red:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Verify both blocker regressions fail on old implementation
+        shell: bash
+        run: |
+          set +e
+          pytest tests/unit/storage/test_state.py -q
+          state_status=$?
+          pytest tests/unit/storage/test_parquet.py -q
+          parquet_status=$?
+          echo "state_status=${state_status}"
+          echo "parquet_status=${parquet_status}"
+          if [ "${state_status}" -eq 0 ] || [ "${parquet_status}" -eq 0 ]; then
+            echo "Expected both regression suites to fail before production fixes."
+            exit 2
+          fi
+          exit 1
