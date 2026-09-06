@@ -15,7 +15,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@v4
         with:
-          ref: bb10976afc22dc2705438de7ecb7bb3f57eea706
+          ref: d3882e3fda178a20dad614d09106e8592b3e78d1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
