@@ -190,6 +190,55 @@ def test_missing_official_answer_identity_fails_closed(tmp_path: Path) -> None:
         list(adapter.acquire(descriptor))
 
 
+def test_answer_id_zero_generates_stable_source_and_record_identity() -> None:
+    path = GOLDEN_DIR / "mathoverflow.net.jsonl"
+    adapter = StackMathQAAdapter()
+    descriptor = tuple(adapter.discover(_config(path)))[0]
+
+    zero_record = list(adapter.acquire(descriptor))[1]
+    expected_source_id = "mathoverflow:1002:0"
+    expected_digest = hashlib.sha256(
+        f"stackmathqa\0{expected_source_id}".encode()
+    ).hexdigest()
+
+    assert zero_record.source_id == expected_source_id
+    assert zero_record.record_id == f"raw_stackmathqa_{expected_digest}"
+    assert zero_record.metadata["answer_id"] == 0
+
+
+def test_negative_answer_id_fails_closed(tmp_path: Path) -> None:
+    path = tmp_path / "mathoverflow.net.jsonl"
+    row = _jsonl_rows(GOLDEN_DIR / "mathoverflow.net.jsonl")[1]
+    meta = row["meta"]
+    assert isinstance(meta, dict)
+    meta["answer_id"] = -1
+    path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    adapter = StackMathQAAdapter()
+    descriptor = tuple(adapter.discover(_config(path)))[0]
+
+    with pytest.raises(ValueError, match=r"answer_id"):
+        list(adapter.acquire(descriptor))
+
+
+@pytest.mark.parametrize("invalid_answer_id", [True, "0", 0.0])
+def test_non_integer_answer_id_fails_closed(
+    tmp_path: Path, invalid_answer_id: object
+) -> None:
+    path = tmp_path / "mathoverflow.net.jsonl"
+    row = _jsonl_rows(GOLDEN_DIR / "mathoverflow.net.jsonl")[1]
+    meta = row["meta"]
+    assert isinstance(meta, dict)
+    meta["answer_id"] = invalid_answer_id
+    path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    adapter = StackMathQAAdapter()
+    descriptor = tuple(adapter.discover(_config(path)))[0]
+
+    with pytest.raises(ValueError, match=r"answer_id"):
+        list(adapter.acquire(descriptor))
+
+
 def test_unparseable_question_identity_fails_closed(tmp_path: Path) -> None:
     path = tmp_path / "math.stackexchange.com.jsonl"
     row = _jsonl_rows(GOLDEN_DIR / "math.stackexchange.com.jsonl")[0]
