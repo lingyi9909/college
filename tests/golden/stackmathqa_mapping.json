@@ -1,0 +1,58 @@
+[
+  {
+    "question_id": "1001",
+    "answer_id": "2001",
+    "site": "math",
+    "question_body": "  Let $A$ be a 2x2 matrix. Find its determinant.  ",
+    "answer_body": "For $A=\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}$, the determinant is $ad-bc$.",
+    "tags": ["linear-algebra", "matrices"],
+    "question_score": 18,
+    "answer_score": 27,
+    "accepted_answer": true,
+    "source_url": "https://math.stackexchange.com/questions/1001",
+    "question_created_at": "2020-01-02T03:04:05Z",
+    "answer_created_at": "2020-01-02T04:05:06Z"
+  },
+  {
+    "question_id": "1002",
+    "answer_id": "2002",
+    "site": "mathoverflow",
+    "question_body": "Show that the stated compactness condition implies the claim.",
+    "answer_body": "The proof uses a finite subcover argument followed by contradiction.",
+    "tags": ["general-topology"],
+    "question_score": 31,
+    "answer_score": 44,
+    "accepted_answer": false,
+    "source_url": "https://mathoverflow.net/questions/1002",
+    "question_created_at": "2021-02-03T04:05:06Z",
+    "answer_created_at": "2021-02-03T05:06:07Z"
+  },
+  {
+    "question_id": "1003",
+    "answer_id": "2003",
+    "site": "statistics",
+    "question_body": "Derive the maximum-likelihood estimator for the mean of a normal sample.",
+    "answer_body": "Differentiate the log-likelihood with respect to the mean and set the derivative to zero; the estimator is the sample mean.",
+    "tags": ["maximum-likelihood", "normal-distribution"],
+    "question_score": 22,
+    "answer_score": 35,
+    "accepted_answer": true,
+    "source_url": "https://stats.stackexchange.com/questions/1003",
+    "question_created_at": "2022-03-04T05:06:07Z",
+    "answer_created_at": "2022-03-04T06:07:08Z"
+  },
+  {
+    "question_id": "1004",
+    "answer_id": "2004",
+    "site": "physics",
+    "question_body": "A particle moves in a harmonic potential. Determine the angular frequency.",
+    "answer_body": "Starting from $m\\ddot{x}=-kx$, compare with $\\ddot{x}+\\omega^2x=0$ to obtain $\\omega=\\sqrt{k/m}$.",
+    "tags": ["classical-mechanics", "harmonic-oscillator"],
+    "question_score": 16,
+    "answer_score": 25,
+    "accepted_answer": true,
+    "source_url": "https://physics.stackexchange.com/questions/1004",
+    "question_created_at": "2023-04-05T06:07:08Z",
+    "answer_created_at": "2023-04-05T07:08:09Z"
+  }
+]
