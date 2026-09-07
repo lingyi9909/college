@@ -1,0 +1,40 @@
+name: Task 7 Review Target Link Regression
+
+on:
+  push:
+    branches:
+      - verification/task7-review-reversed-red
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout develop exact Task 7 HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: 6738b3db951ba5c8b35a8a9e2670223d0f4ea254
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Reproduce target-id link preservation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from college_builder.normalize.html import normalize_html
+
+          source = '<p>Refer to <link target-id="fig-7"/> before answering.</p>'
+          result = normalize_html(source)
+          structurally_preserved = 'fig-7' in result.text
+          failed_closed = bool(result.unresolved_structure)
+          print('normalized=', repr(result.text))
+          print('unresolved=', result.unresolved_structure)
+          assert structurally_preserved or failed_closed, (
+              'target-id link was silently deleted: '
+              f'{result.text!r}'
+          )
+          PY
