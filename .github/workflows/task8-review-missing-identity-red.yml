@@ -1,0 +1,57 @@
+name: Task 8 Missing Identity Acceptance RED
+
+on:
+  push:
+    branches:
+      - verification/task8-review-missing-identity-red
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact Task 8 develop HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: 4f291a12b999fa91a6cdfc485edc0dfc66eea941
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Missing gate identity must fail closed
+        shell: bash
+        run: |
+          python - <<'PY'
+          from datetime import UTC, datetime
+          from college_builder.domain.evidence import GateVerdict
+          from college_builder.quality.engine import GateContext, GateEngine, GateResultEvidence
+
+          class MissingIdentityGate:
+              def evaluate(self, candidate, context):
+                  return GateResultEvidence(
+                      gate_name="unknown_gate",
+                      verdict=GateVerdict.PASS,
+                      score=1.0,
+                      provider="unknown_provider",
+                      model="unknown_model",
+                      prompt_version="unknown_prompt",
+                      config_version=context.config_version,
+                      reason_code="SHOULD_NOT_PASS",
+                      evidence_payload={},
+                      timestamp=datetime.now(UTC),
+                  )
+
+          result = GateEngine(
+              gates=(MissingIdentityGate(),),
+              context=GateContext(config_version="pilot-v1"),
+          ).run("candidate")
+          assert result.verdict is GateVerdict.REJECT, result
+          assert result.evidence[0].reason_code in {
+              "MALFORMED_GATE_IDENTITY",
+              "GATE_IDENTITY_MISSING",
+          }, result.evidence[0]
+          PY
