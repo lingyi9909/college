@@ -1,0 +1,58 @@
+name: Task 8 Malformed Typed Output Acceptance RED
+
+on:
+  push:
+    branches:
+      - verification/task8-review-malformed-output-red
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact Task 8 develop HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: 4f291a12b999fa91a6cdfc485edc0dfc66eea941
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Malformed typed gate output must fail closed
+        shell: bash
+        run: |
+          python - <<'PY'
+          from datetime import UTC, datetime
+          from college_builder.domain.evidence import GateVerdict
+          from college_builder.quality.engine import GateContext, GateEngine, GateResultEvidence
+
+          class MalformedTypedGate:
+              name = "gate_malformed_typed"
+              provider = "deterministic"
+              model = "malformed_v1"
+              prompt_version = "not_applicable"
+
+              def evaluate(self, candidate, context):
+                  return GateResultEvidence.model_construct(
+                      gate_name=self.name,
+                      verdict="MAYBE",
+                      provider=self.provider,
+                      model=self.model,
+                      prompt_version=self.prompt_version,
+                      config_version=context.config_version,
+                      reason_code="BYPASSED_VALIDATION",
+                      evidence_payload={},
+                      timestamp=datetime.now(UTC),
+                  )
+
+          result = GateEngine(
+              gates=(MalformedTypedGate(),),
+              context=GateContext(config_version="pilot-v1"),
+          ).run("candidate")
+          assert result.verdict is GateVerdict.REJECT, result
+          assert result.evidence[0].reason_code == "MALFORMED_GATE_OUTPUT", result.evidence[0]
+          PY
