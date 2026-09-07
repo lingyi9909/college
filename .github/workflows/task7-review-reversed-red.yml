@@ -1,4 +1,4 @@
-name: Task 7 Review Reversed List Regression
+name: Task 7 Review Semantic Loss Regressions
 
 on:
   push:
@@ -21,20 +21,37 @@ jobs:
           python-version: '3.12'
       - name: Install project
         run: python -m pip install -e ".[dev]"
-      - name: Reproduce reversed ordered-list semantic preservation
+      - name: Reproduce semantic-loss boundaries
         shell: bash
         run: |
           python - <<'PY'
           from college_builder.normalize.html import normalize_html
 
-          source = '<ol reversed><li>Option A</li><li>Option B</li></ol>'
-          result = normalize_html(source)
-          semantically_preserved = result.text == '2. Option A\n1. Option B'
-          failed_closed = '<ol' in result.text and bool(result.unresolved_structure)
-          print('normalized=', repr(result.text))
-          print('unresolved=', result.unresolved_structure)
-          assert semantically_preserved or failed_closed, (
-              'reversed ordered-list semantics were silently rewritten: '
-              f'{result.text!r}'
-          )
+          failures = []
+
+          reversed_source = '<ol reversed><li>Option A</li><li>Option B</li></ol>'
+          reversed_result = normalize_html(reversed_source)
+          reversed_preserved = reversed_result.text == '2. Option A\n1. Option B'
+          reversed_closed = '<ol' in reversed_result.text and bool(reversed_result.unresolved_structure)
+          print('reversed.normalized=', repr(reversed_result.text))
+          print('reversed.unresolved=', reversed_result.unresolved_structure)
+          if not (reversed_preserved or reversed_closed):
+              failures.append(
+                  'reversed ordered-list semantics silently rewritten: '
+                  f'{reversed_result.text!r}'
+              )
+
+          link_source = '<p>Refer to <link target-id="fig-7"/> before answering.</p>'
+          link_result = normalize_html(link_source)
+          link_preserved = 'fig-7' in link_result.text
+          link_closed = bool(link_result.unresolved_structure)
+          print('target_link.normalized=', repr(link_result.text))
+          print('target_link.unresolved=', link_result.unresolved_structure)
+          if not (link_preserved or link_closed):
+              failures.append(
+                  'target-id link silently deleted: '
+                  f'{link_result.text!r}'
+              )
+
+          assert not failures, '\n'.join(failures)
           PY
