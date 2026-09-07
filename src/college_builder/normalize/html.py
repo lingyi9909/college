@@ -288,6 +288,9 @@ class _Renderer:
         return self._preserve_structure(node, f"UNSUPPORTED_EMPHASIS_EFFECT:{effect}")
 
     def _render_link(self, node: Tag) -> str:
+        target_id = _attribute(node, "target-id")
+        if target_id:
+            return self._preserve_structure(node, "CNXML_TARGET_ID_LINK")
         label = self._render_children(node).strip()
         target = _attribute(node, "href") or _attribute(node, "url")
         return f"[{label}]({target})" if target else label
@@ -301,10 +304,10 @@ class _Renderer:
         return f"![{alt}]({src})"
 
     def _render_list(self, node: Tag, *, ordered: bool) -> str:
-        settings = _ordered_list_settings(node) if ordered else (1, "1")
+        settings = _ordered_list_settings(node) if ordered else (1, "1", 1)
         if settings is None:
             return self._preserve_structure(node, "UNSUPPORTED_ORDERED_LIST_ATTRIBUTES")
-        current, marker_type = settings
+        current, marker_type, step = settings
         lines: list[str] = []
 
         for child in node.children:
@@ -319,7 +322,7 @@ class _Renderer:
                 marker = _ordered_marker(current, marker_type)
                 if marker is None:
                     return self._preserve_structure(node, "UNSUPPORTED_ORDERED_LIST_VALUE")
-                current += 1
+                current += step
             else:
                 marker = "-"
 
@@ -505,17 +508,28 @@ def _markdown_target_url(target: str) -> str:
     return target.split(maxsplit=1)[0] if target else ""
 
 
-def _ordered_list_settings(node: Tag) -> tuple[int, str] | None:
+def _ordered_list_settings(node: Tag) -> tuple[int, str, int] | None:
     marker_type = _attribute(node, "type") or "1"
     if marker_type not in {"1", "A", "a", "I", "i"}:
         return None
+
+    reversed_list = "reversed" in node.attrs
     raw_start = _attribute(node, "start")
-    if not raw_start:
-        return 1, marker_type
-    try:
-        return int(raw_start), marker_type
-    except ValueError:
-        return None
+    if raw_start:
+        try:
+            start = int(raw_start)
+        except ValueError:
+            return None
+    elif reversed_list:
+        start = sum(
+            1
+            for child in node.children
+            if isinstance(child, Tag) and _local_name(child.name) == "li"
+        )
+    else:
+        start = 1
+
+    return start, marker_type, -1 if reversed_list else 1
 
 
 def _optional_int_attribute(node: Tag, name: str) -> int | bool | None:
