@@ -1,0 +1,40 @@
+name: Task 7 Review Reversed List Regression
+
+on:
+  push:
+    branches:
+      - verification/task7-review-reversed-red
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout develop exact Task 7 HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: 6738b3db951ba5c8b35a8a9e2670223d0f4ea254
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Reproduce reversed ordered-list semantic preservation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from college_builder.normalize.html import normalize_html
+
+          source = '<ol reversed><li>Option A</li><li>Option B</li></ol>'
+          result = normalize_html(source)
+          semantically_preserved = result.text == '2. Option A\n1. Option B'
+          failed_closed = '<ol' in result.text and bool(result.unresolved_structure)
+          print('normalized=', repr(result.text))
+          print('unresolved=', result.unresolved_structure)
+          assert semantically_preserved or failed_closed, (
+              'reversed ordered-list semantics were silently rewritten: '
+              f'{result.text!r}'
+          )
+          PY
