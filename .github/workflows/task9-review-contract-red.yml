@@ -1,0 +1,204 @@
+name: Task 9 Acceptance Contract RED
+
+on:
+  push:
+    branches:
+      - verification/task9-review-contract-red
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact Task 9 develop HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: 21cbafbf17ae7723b81474c56b9e25cca8f34f27
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Task 9 acceptance contracts
+        shell: bash
+        run: |
+          python - <<'PY'
+          from college_builder.domain.evidence import GateVerdict
+          from college_builder.domain.source import NormalizedQA
+          from college_builder.providers.base import ModelDecision
+          from college_builder.providers.fake import FakeStructuredModelProvider
+          from college_builder.quality.classify import ProblemGate, UniversityStemGate
+          from college_builder.quality.engine import GateContext, GateEngine
+
+          failures = []
+
+          def candidate(question, metadata=None):
+              return NormalizedQA(
+                  record_id="norm-acceptance",
+                  source_record_id="raw-acceptance",
+                  question=question,
+                  answer="source answer",
+                  analysis="source analysis",
+                  subject_candidates=(),
+                  images=(),
+                  metadata=metadata or {},
+                  normalization_evidence={},
+              )
+
+          def decision(label, score, refs=("question:0-20",)):
+              return ModelDecision(
+                  label=label,
+                  score=score,
+                  evidence_references=refs,
+                  reason_code="ACCEPTANCE",
+              )
+
+          def run(gate, item):
+              return GateEngine(
+                  gates=(gate,),
+                  context=GateContext(config_version="pilot-v1"),
+              ).run(item).evidence[0]
+
+          # Approved threshold state machine: >=0.98 PASS without verifier.
+          primary = FakeStructuredModelProvider(
+              provider="fake", model="primary-v1",
+              decisions=(decision("UNIVERSITY_STEM", 0.99),),
+          )
+          verifier = FakeStructuredModelProvider(
+              provider="fake", model="verifier-v2", decisions=(),
+          )
+          evidence = run(
+              UniversityStemGate(
+                  primary=primary, verifier=verifier,
+                  prompt="classify", prompt_version="v1",
+              ),
+              candidate("Compute the eigenvalues of A."),
+          )
+          if evidence.verdict is not GateVerdict.PASS or verifier.requests:
+              failures.append(
+                  f"high-confidence primary must PASS without verifier; got {evidence.verdict} "
+                  f"reason={evidence.reason_code} verifier_calls={len(verifier.requests)}"
+              )
+
+          # Approved threshold state machine: <0.90 REJECT without verifier.
+          primary = FakeStructuredModelProvider(
+              provider="fake", model="primary-v1",
+              decisions=(decision("UNIVERSITY_STEM", 0.89),),
+          )
+          verifier = FakeStructuredModelProvider(
+              provider="fake", model="verifier-v2", decisions=(),
+          )
+          evidence = run(
+              UniversityStemGate(
+                  primary=primary, verifier=verifier,
+                  prompt="classify", prompt_version="v1",
+              ),
+              candidate("Compute the eigenvalues of A."),
+          )
+          if evidence.verdict is not GateVerdict.REJECT or verifier.requests:
+              failures.append(
+                  f"low-confidence primary must REJECT without verifier; got {evidence.verdict} "
+                  f"reason={evidence.reason_code} verifier_calls={len(verifier.requests)}"
+              )
+
+          # Formal Gate 2 taxonomy explicitly allows MULTIPLE_CHOICE.
+          primary = FakeStructuredModelProvider(
+              provider="fake", model="primary-v1",
+              decisions=(decision("MULTIPLE_CHOICE", 0.99),),
+          )
+          verifier = FakeStructuredModelProvider(
+              provider="fake", model="verifier-v2",
+              decisions=(decision("MULTIPLE_CHOICE", 0.99),),
+          )
+          evidence = run(
+              ProblemGate(
+                  primary=primary, verifier=verifier,
+                  prompt="classify", prompt_version="v1",
+              ),
+              candidate("Which option is the eigenvalue? A. 1 B. 2 C. 3 D. 4"),
+          )
+          if evidence.verdict is not GateVerdict.PASS:
+              failures.append(
+                  f"MULTIPLE_CHOICE must be an allowed positive problem type; got "
+                  f"{evidence.verdict} reason={evidence.reason_code}"
+              )
+
+          # Site/tag evidence may support classification but can never be sole positive evidence.
+          site_only = ("source_hints.metadata.site",)
+          primary = FakeStructuredModelProvider(
+              provider="fake", model="primary-v1",
+              decisions=(decision("UNIVERSITY_STEM", 0.99, site_only),),
+          )
+          verifier = FakeStructuredModelProvider(
+              provider="fake", model="verifier-v2",
+              decisions=(decision("UNIVERSITY_STEM", 0.99, site_only),),
+          )
+          evidence = run(
+              UniversityStemGate(
+                  primary=primary, verifier=verifier,
+                  prompt="classify", prompt_version="v1",
+              ),
+              candidate(
+                  "What is 7 + 5?",
+                  metadata={"site": "math.stackexchange.com", "tags": ["arithmetic"]},
+              ),
+          )
+          if evidence.verdict is GateVerdict.PASS:
+              failures.append("math.stackexchange.com/site-only evidence can currently force PASS")
+
+          # Formal reject reason taxonomy must remain stable and auditable.
+          reason_cases = [
+              ("NON_STEM", "NON_STEM"),
+              ("K12", "NOT_UNIVERSITY_LEVEL"),
+              ("UNCERTAIN", "UNIVERSITY_LEVEL_UNCERTAIN"),
+          ]
+          for label, expected_reason in reason_cases:
+              primary = FakeStructuredModelProvider(
+                  provider="fake", model="primary-v1",
+                  decisions=(decision(label, 0.99),),
+              )
+              verifier = FakeStructuredModelProvider(
+                  provider="fake", model="verifier-v2",
+                  decisions=(decision(label, 0.99),),
+              )
+              evidence = run(
+                  UniversityStemGate(
+                      primary=primary, verifier=verifier,
+                      prompt="classify", prompt_version="v1",
+                  ),
+                  candidate("classification reason case"),
+              )
+              if evidence.reason_code != expected_reason:
+                  failures.append(
+                      f"University label {label} expected reason {expected_reason}, "
+                      f"got {evidence.reason_code}"
+                  )
+
+          primary = FakeStructuredModelProvider(
+              provider="fake", model="primary-v1",
+              decisions=(decision("OPINION", 0.99),),
+          )
+          verifier = FakeStructuredModelProvider(
+              provider="fake", model="verifier-v2",
+              decisions=(decision("OPINION", 0.99),),
+          )
+          evidence = run(
+              ProblemGate(
+                  primary=primary, verifier=verifier,
+                  prompt="classify", prompt_version="v1",
+              ),
+              candidate("What do you think about this tool?"),
+          )
+          if evidence.reason_code != "NOT_PROBLEM":
+              failures.append(f"Problem negative expected NOT_PROBLEM, got {evidence.reason_code}")
+
+          if failures:
+              print("TASK9_ACCEPTANCE_RED")
+              for failure in failures:
+                  print("-", failure)
+              raise SystemExit(1)
+          print("TASK9_ACCEPTANCE_GREEN")
+          PY
