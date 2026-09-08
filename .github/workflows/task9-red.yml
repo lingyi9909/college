@@ -1,0 +1,25 @@
+name: Task 9 RED
+
+on:
+  push:
+    branches:
+      - verification/task9-red
+
+jobs:
+  red:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Task 9 test-only HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: aed85733f6020a5d2c21959dedf663bd30536f57
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Task 9 RED tests
+        run: pytest tests/unit/providers tests/unit/quality/test_classify.py -q
