@@ -31,18 +31,24 @@ def _candidate(
     )
 
 
-def _decision(label: str, score: float, reason: str = "TEST") -> ModelDecision:
+def _decision(
+    label: str,
+    score: float,
+    reason: str = "TEST",
+    *,
+    evidence_references: tuple[str, ...] = ("question:0-20",),
+) -> ModelDecision:
     return ModelDecision(
         label=label,
         score=score,
-        evidence_references=("question:0-20",),
+        evidence_references=evidence_references,
         reason_code=reason,
     )
 
 
 def _providers(
     primary: ModelDecision,
-    verifier: ModelDecision,
+    verifier: ModelDecision | None,
     *,
     primary_identity: tuple[str, str] = ("fake", "primary-v1"),
     verifier_identity: tuple[str, str] = ("fake", "verifier-v2"),
@@ -56,12 +62,15 @@ def _providers(
         FakeStructuredModelProvider(
             provider=verifier_identity[0],
             model=verifier_identity[1],
-            decisions=(verifier,),
+            decisions=() if verifier is None else (verifier,),
         ),
     )
 
 
-def _run(gate: UniversityStemGate | ProblemGate, candidate: NormalizedQA) -> GateResultEvidence:
+def _run(
+    gate: UniversityStemGate | ProblemGate,
+    candidate: NormalizedQA,
+) -> GateResultEvidence:
     result = GateEngine(
         gates=(gate,),
         context=GateContext(config_version="pilot-v1"),
@@ -71,11 +80,8 @@ def _run(gate: UniversityStemGate | ProblemGate, candidate: NormalizedQA) -> Gat
 
 
 @pytest.mark.parametrize("score", [0.98, 0.99, 1.0])
-def test_university_gate_passes_only_at_or_above_pilot_threshold(score: float) -> None:
-    primary, verifier = _providers(
-        _decision("UNIVERSITY_STEM", score),
-        _decision("UNIVERSITY_STEM", score),
-    )
+def test_university_high_band_passes_without_verifier(score: float) -> None:
+    primary, verifier = _providers(_decision("UNIVERSITY_STEM", score), None)
     gate = UniversityStemGate(
         primary=primary,
         verifier=verifier,
@@ -87,32 +93,13 @@ def test_university_gate_passes_only_at_or_above_pilot_threshold(score: float) -
 
     assert evidence.verdict is GateVerdict.PASS
     assert evidence.score == score
+    assert len(primary.requests) == 1
+    assert len(verifier.requests) == 0
+    assert "verifier" not in evidence.evidence_payload
 
 
-@pytest.mark.parametrize("score", [0.90, 0.95, 0.979999])
-def test_university_gate_routes_mid_confidence_to_verify(score: float) -> None:
-    primary, verifier = _providers(
-        _decision("UNIVERSITY_STEM", score),
-        _decision("UNIVERSITY_STEM", score),
-    )
-    gate = UniversityStemGate(
-        primary=primary,
-        verifier=verifier,
-        prompt="university prompt",
-        prompt_version="v1",
-    )
-
-    evidence = _run(gate, _candidate("Derive the wave equation from Maxwell's equations."))
-
-    assert evidence.verdict is GateVerdict.VERIFY
-    assert evidence.score == score
-
-
-def test_university_gate_rejects_below_verify_threshold() -> None:
-    primary, verifier = _providers(
-        _decision("UNIVERSITY_STEM", 0.899999),
-        _decision("UNIVERSITY_STEM", 0.899999),
-    )
+def test_university_low_band_rejects_without_verifier() -> None:
+    primary, verifier = _providers(_decision("UNIVERSITY_STEM", 0.89), None)
     gate = UniversityStemGate(
         primary=primary,
         verifier=verifier,
@@ -123,12 +110,37 @@ def test_university_gate_rejects_below_verify_threshold() -> None:
     evidence = _run(gate, _candidate("Prove the asymptotic complexity bound."))
 
     assert evidence.verdict is GateVerdict.REJECT
-    assert evidence.reason_code == "UNIVERSITY_STEM_LOW_CONFIDENCE"
+    assert evidence.reason_code == "UNIVERSITY_LEVEL_UNCERTAIN"
+    assert len(primary.requests) == 1
+    assert len(verifier.requests) == 0
 
 
-def test_primary_verifier_label_conflict_fails_closed() -> None:
+@pytest.mark.parametrize("score", [0.90, 0.95, 0.979999])
+def test_university_middle_band_calls_verifier_and_routes_to_verify(score: float) -> None:
     primary, verifier = _providers(
+        _decision("UNIVERSITY_STEM", score),
         _decision("UNIVERSITY_STEM", 0.99),
+    )
+    gate = UniversityStemGate(
+        primary=primary,
+        verifier=verifier,
+        prompt="university prompt",
+        prompt_version="v1",
+    )
+
+    evidence = _run(
+        gate,
+        _candidate("Derive the wave equation from Maxwell's equations."),
+    )
+
+    assert evidence.verdict is GateVerdict.VERIFY
+    assert evidence.score == score
+    assert len(verifier.requests) == 1
+
+
+def test_primary_verifier_label_conflict_fails_closed_in_middle_band() -> None:
+    primary, verifier = _providers(
+        _decision("UNIVERSITY_STEM", 0.95),
         _decision("K12", 0.99),
     )
     gate = UniversityStemGate(
@@ -142,11 +154,12 @@ def test_primary_verifier_label_conflict_fails_closed() -> None:
 
     assert evidence.verdict is GateVerdict.REJECT
     assert evidence.reason_code == "MODEL_DECISION_CONFLICT"
+    assert len(verifier.requests) == 1
 
 
-def test_primary_and_verifier_must_have_independent_provider_model_identity() -> None:
+def test_middle_band_verifier_must_have_independent_provider_model_identity() -> None:
     primary, verifier = _providers(
-        _decision("UNIVERSITY_STEM", 0.99),
+        _decision("UNIVERSITY_STEM", 0.95),
         _decision("UNIVERSITY_STEM", 0.99),
         primary_identity=("fake", "same-model"),
         verifier_identity=("fake", "same-model"),
@@ -162,11 +175,13 @@ def test_primary_and_verifier_must_have_independent_provider_model_identity() ->
 
     assert evidence.verdict is GateVerdict.REJECT
     assert evidence.reason_code == "VERIFIER_NOT_INDEPENDENT"
+    assert len(primary.requests) == 1
+    assert len(verifier.requests) == 0
 
 
-def test_gate_evidence_records_both_execution_identities_and_decisions() -> None:
+def test_gate_evidence_records_both_middle_band_execution_decisions() -> None:
     primary, verifier = _providers(
-        _decision("UNIVERSITY_STEM", 0.99, "PRIMARY_REASON"),
+        _decision("UNIVERSITY_STEM", 0.95, "PRIMARY_REASON"),
         _decision("UNIVERSITY_STEM", 0.985, "VERIFIER_REASON"),
         primary_identity=("provider-a", "model-a"),
         verifier_identity=("provider-b", "model-b"),
@@ -180,7 +195,7 @@ def test_gate_evidence_records_both_execution_identities_and_decisions() -> None
 
     evidence = _run(gate, _candidate("Diagonalize the matrix."))
 
-    assert evidence.verdict is GateVerdict.PASS
+    assert evidence.verdict is GateVerdict.VERIFY
     assert evidence.provider == "provider-a"
     assert evidence.model == "model-a"
     assert evidence.prompt_version == "v1"
@@ -188,7 +203,7 @@ def test_gate_evidence_records_both_execution_identities_and_decisions() -> None
         "provider": "provider-a",
         "model": "model-a",
         "label": "UNIVERSITY_STEM",
-        "score": 0.99,
+        "score": 0.95,
         "reason_code": "PRIMARY_REASON",
         "evidence_references": ["question:0-20"],
     }
@@ -210,13 +225,10 @@ def test_gate_evidence_records_both_execution_identities_and_decisions() -> None
         "Prove that this divide-and-conquer algorithm runs in O(n log n).",
     ],
 )
-def test_university_stem_positive_taxonomy_can_pass_with_independent_evidence(
+def test_university_stem_positive_taxonomy_can_pass_with_content_evidence(
     question: str,
 ) -> None:
-    primary, verifier = _providers(
-        _decision("UNIVERSITY_STEM", 0.99),
-        _decision("UNIVERSITY_STEM", 0.99),
-    )
+    primary, verifier = _providers(_decision("UNIVERSITY_STEM", 0.99), None)
     gate = UniversityStemGate(
         primary=primary,
         verifier=verifier,
@@ -227,22 +239,42 @@ def test_university_stem_positive_taxonomy_can_pass_with_independent_evidence(
     evidence = _run(gate, _candidate(question))
 
     assert evidence.verdict is GateVerdict.PASS
+    assert len(verifier.requests) == 0
 
 
 @pytest.mark.parametrize(
-    ("question", "label"),
+    ("question", "label", "reason_code"),
     [
-        ("Which IDE do you recommend for Python?", "NON_UNIVERSITY_STEM"),
-        ("How do I install this software package?", "NON_UNIVERSITY_STEM"),
-        ("Should I choose a software engineering career?", "NON_UNIVERSITY_STEM"),
-        ("What is 7 + 5?", "K12"),
+        (
+            "Which IDE do you recommend for Python?",
+            "NON_UNIVERSITY_STEM",
+            "NOT_UNIVERSITY_LEVEL",
+        ),
+        (
+            "How do I install this software package?",
+            "NON_UNIVERSITY_STEM",
+            "NOT_UNIVERSITY_LEVEL",
+        ),
+        (
+            "Should I choose a software engineering career?",
+            "NON_UNIVERSITY_STEM",
+            "NOT_UNIVERSITY_LEVEL",
+        ),
+        ("What is 7 + 5?", "K12", "NOT_UNIVERSITY_LEVEL"),
+        ("Discuss Renaissance painting.", "NON_STEM", "NON_STEM"),
+        (
+            "This item cannot be classified confidently.",
+            "UNCERTAIN",
+            "UNIVERSITY_LEVEL_UNCERTAIN",
+        ),
     ],
 )
-def test_university_stem_negative_taxonomy_rejects(question: str, label: str) -> None:
-    primary, verifier = _providers(
-        _decision(label, 0.99),
-        _decision(label, 0.99),
-    )
+def test_university_stem_semantic_reject_reason_taxonomy(
+    question: str,
+    label: str,
+    reason_code: str,
+) -> None:
+    primary, verifier = _providers(_decision(label, 0.99), None)
     gate = UniversityStemGate(
         primary=primary,
         verifier=verifier,
@@ -253,13 +285,26 @@ def test_university_stem_negative_taxonomy_rejects(question: str, label: str) ->
     evidence = _run(gate, _candidate(question))
 
     assert evidence.verdict is GateVerdict.REJECT
-    assert evidence.reason_code == "NOT_UNIVERSITY_STEM"
+    assert evidence.reason_code == reason_code
+    assert len(verifier.requests) == 0
 
 
-def test_math_stackexchange_site_hint_never_forces_university_pass() -> None:
+def test_university_site_and_tag_only_evidence_cannot_support_positive_pass() -> None:
+    hint_only = (
+        "source_hints.metadata.site",
+        "source_hints.metadata.tags[0]",
+    )
     primary, verifier = _providers(
-        _decision("K12", 0.99),
-        _decision("K12", 0.99),
+        _decision(
+            "UNIVERSITY_STEM",
+            0.99,
+            evidence_references=hint_only,
+        ),
+        _decision(
+            "UNIVERSITY_STEM",
+            0.99,
+            evidence_references=hint_only,
+        ),
     )
     gate = UniversityStemGate(
         primary=primary,
@@ -276,7 +321,8 @@ def test_math_stackexchange_site_hint_never_forces_university_pass() -> None:
     evidence = _run(gate, candidate)
 
     assert evidence.verdict is GateVerdict.REJECT
-    assert evidence.reason_code == "NOT_UNIVERSITY_STEM"
+    assert evidence.reason_code == "UNIVERSITY_LEVEL_UNCERTAIN"
+    assert len(verifier.requests) == 0
     assert primary.requests[0].inputs["source_hints"] == {
         "subject_candidates": ["mathematics"],
         "metadata": {"site": "math.stackexchange.com", "tags": ["arithmetic"]},
@@ -290,13 +336,14 @@ def test_math_stackexchange_site_hint_never_forces_university_pass() -> None:
         "PROOF",
         "DERIVATION",
         "CONCEPTUAL",
-        "ALGORITHM",
+        "MULTIPLE_CHOICE",
         "PROGRAMMING",
+        "ALGORITHM",
         "ENGINEERING",
     ],
 )
 def test_problem_positive_taxonomy_can_pass(label: str) -> None:
-    primary, verifier = _providers(_decision(label, 0.99), _decision(label, 0.99))
+    primary, verifier = _providers(_decision(label, 0.99), None)
     gate = ProblemGate(
         primary=primary,
         verifier=verifier,
@@ -307,14 +354,24 @@ def test_problem_positive_taxonomy_can_pass(label: str) -> None:
     evidence = _run(gate, _candidate("Solve the stated STEM problem."))
 
     assert evidence.verdict is GateVerdict.PASS
+    assert len(verifier.requests) == 0
 
 
 @pytest.mark.parametrize(
     "label",
-    ["SOFTWARE_USE", "DEBUG_HELP", "OPINION", "RESOURCE_REQUEST", "META"],
+    [
+        "SOFTWARE_USAGE",
+        "DEBUG_HELP",
+        "CAREER_ADVICE",
+        "OPINION",
+        "RESOURCE_REQUEST",
+        "DISCUSSION",
+        "NEWS",
+        "META",
+    ],
 )
-def test_problem_negative_taxonomy_rejects(label: str) -> None:
-    primary, verifier = _providers(_decision(label, 0.99), _decision(label, 0.99))
+def test_problem_formal_negative_taxonomy_rejects(label: str) -> None:
+    primary, verifier = _providers(_decision(label, 0.99), None)
     gate = ProblemGate(
         primary=primary,
         verifier=verifier,
@@ -325,10 +382,27 @@ def test_problem_negative_taxonomy_rejects(label: str) -> None:
     evidence = _run(gate, _candidate("Please recommend a debugging resource."))
 
     assert evidence.verdict is GateVerdict.REJECT
-    assert evidence.reason_code == "NOT_A_PROBLEM"
+    assert evidence.reason_code == "NOT_PROBLEM"
+    assert len(verifier.requests) == 0
 
 
-def test_problem_gate_applies_same_threshold_bands() -> None:
+def test_problem_uncertain_label_uses_formal_uncertain_reason() -> None:
+    primary, verifier = _providers(_decision("UNCERTAIN", 0.99), None)
+    gate = ProblemGate(
+        primary=primary,
+        verifier=verifier,
+        prompt="problem prompt",
+        prompt_version="v1",
+    )
+
+    evidence = _run(gate, _candidate("Ambiguous source content."))
+
+    assert evidence.verdict is GateVerdict.REJECT
+    assert evidence.reason_code == "PROBLEM_TYPE_UNCERTAIN"
+    assert len(verifier.requests) == 0
+
+
+def test_problem_gate_uses_middle_band_verifier_path() -> None:
     primary, verifier = _providers(
         _decision("CALCULATION", 0.95),
         _decision("CALCULATION", 0.99),
@@ -344,6 +418,34 @@ def test_problem_gate_applies_same_threshold_bands() -> None:
 
     assert evidence.verdict is GateVerdict.VERIFY
     assert evidence.score == 0.95
+    assert len(verifier.requests) == 1
+
+
+def test_problem_site_and_tag_only_evidence_cannot_support_positive_pass() -> None:
+    hint_only = (
+        "source_hints.metadata.site",
+        "source_hints.metadata.tags[0]",
+    )
+    primary, verifier = _providers(
+        _decision("CALCULATION", 0.99, evidence_references=hint_only),
+        _decision("CALCULATION", 0.99, evidence_references=hint_only),
+    )
+    gate = ProblemGate(
+        primary=primary,
+        verifier=verifier,
+        prompt="problem prompt",
+        prompt_version="v1",
+    )
+    candidate = _candidate(
+        "What is 7 + 5?",
+        metadata={"site": "math.stackexchange.com", "tags": ["arithmetic"]},
+    )
+
+    evidence = _run(gate, candidate)
+
+    assert evidence.verdict is GateVerdict.REJECT
+    assert evidence.reason_code == "PROBLEM_TYPE_UNCERTAIN"
+    assert len(verifier.requests) == 0
 
 
 class ConstructedMalformedProvider:
@@ -377,3 +479,4 @@ def test_gate_revalidates_typed_model_decision_at_provider_boundary() -> None:
 
     assert evidence.verdict is GateVerdict.REJECT
     assert evidence.reason_code == "MALFORMED_MODEL_DECISION"
+    assert len(verifier.requests) == 0
