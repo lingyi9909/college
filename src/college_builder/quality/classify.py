@@ -113,7 +113,7 @@ class _DualProviderClassificationGate:
         if isinstance(verifier, GateResultEvidence):
             return verifier
 
-        evidence_payload = {
+        evidence_payload: dict[str, JsonValue] = {
             "primary": _decision_evidence(self.primary, primary),
             "verifier": _decision_evidence(self.verifier, verifier),
         }
