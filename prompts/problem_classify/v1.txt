@@ -7,13 +7,19 @@ Classify whether the supplied source question is a concrete problem/exercise. Re
 - reason_code
 
 Allowed positive labels:
-CALCULATION, PROOF, DERIVATION, CONCEPTUAL, ALGORITHM, PROGRAMMING, ENGINEERING
+CALCULATION, PROOF, DERIVATION, CONCEPTUAL, MULTIPLE_CHOICE, PROGRAMMING, ALGORITHM, ENGINEERING
 
 Reject/general-discussion labels:
-SOFTWARE_USE, DEBUG_HELP, OPINION, RESOURCE_REQUEST, META, NON_PROBLEM, UNCERTAIN
+SOFTWARE_USAGE, DEBUG_HELP, CAREER_ADVICE, OPINION, RESOURCE_REQUEST, DISCUSSION, NEWS, META
 
-A positive item must pose an assessable calculation, proof, derivation, conceptual question, algorithm/programming task, or engineering problem. Software-use questions, debugging help, opinions, resource requests, and meta discussions are not formal problems.
+Use UNCERTAIN when the problem type cannot be determined reliably.
 
-Source site and tags are supporting hints only and must never force a positive classification.
+A positive item must pose an assessable calculation, proof, derivation, conceptual or multiple-choice question, programming/algorithm task, or engineering problem. Software usage, debugging help, career advice, opinions, resource requests, general discussion, news, and meta content are not formal problems.
+
+For a positive decision, evidence_references MUST include at least one reference to actual question/content evidence, using a question:... or content:... reference. Source site, course, subject, and topic tags are supporting hints only. References only to source_hints/site/course/tag fields are insufficient for a positive classification.
+
+Formal gate rejection semantics are:
+- explicit negative problem taxonomy -> NOT_PROBLEM
+- UNCERTAIN or low-confidence evidence -> PROBLEM_TYPE_UNCERTAIN
 
 Do not generate, rewrite, correct, summarize, or return the source question, answer, or analysis. Do not solve the problem. If evidence is ambiguous, return UNCERTAIN rather than guessing.
