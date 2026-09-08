@@ -29,25 +29,28 @@ PROBLEM_POSITIVE_LABELS = frozenset(
         "PROOF",
         "DERIVATION",
         "CONCEPTUAL",
-        "ALGORITHM",
+        "MULTIPLE_CHOICE",
         "PROGRAMMING",
+        "ALGORITHM",
         "ENGINEERING",
     }
 )
-PROBLEM_LABELS = tuple(
-    sorted(
-        PROBLEM_POSITIVE_LABELS
-        | {
-            "SOFTWARE_USE",
-            "DEBUG_HELP",
-            "OPINION",
-            "RESOURCE_REQUEST",
-            "META",
-            "NON_PROBLEM",
-            "UNCERTAIN",
-        }
-    )
+PROBLEM_NEGATIVE_LABELS = frozenset(
+    {
+        "SOFTWARE_USAGE",
+        "DEBUG_HELP",
+        "CAREER_ADVICE",
+        "OPINION",
+        "RESOURCE_REQUEST",
+        "DISCUSSION",
+        "NEWS",
+        "META",
+    }
 )
+PROBLEM_LABELS = tuple(
+    sorted(PROBLEM_POSITIVE_LABELS | PROBLEM_NEGATIVE_LABELS | {"UNCERTAIN"})
+)
+_CONTENT_EVIDENCE_PREFIXES = ("question:", "content:")
 
 
 class _DualProviderClassificationGate:
@@ -55,8 +58,8 @@ class _DualProviderClassificationGate:
     task: ClassVar[str]
     allowed_labels: ClassVar[tuple[str, ...]]
     positive_labels: ClassVar[frozenset[str]]
-    negative_reason: ClassVar[str]
-    low_confidence_reason: ClassVar[str]
+    reject_reasons: ClassVar[dict[str, str]]
+    uncertain_reason: ClassVar[str]
     pass_reason: ClassVar[str]
     verify_reason: ClassVar[str]
 
@@ -86,20 +89,6 @@ class _DualProviderClassificationGate:
         self.verify_threshold = verify_threshold
 
     def evaluate(self, candidate: NormalizedQA, context: GateContext) -> GateResultEvidence:
-        primary_identity = _provider_identity(self.primary, "primary")
-        verifier_identity = _provider_identity(self.verifier, "verifier")
-        if primary_identity == verifier_identity:
-            return self._result(
-                context,
-                verdict=GateVerdict.REJECT,
-                score=0.0,
-                reason_code="VERIFIER_NOT_INDEPENDENT",
-                evidence_payload={
-                    "primary_identity": list(primary_identity),
-                    "verifier_identity": list(verifier_identity),
-                },
-            )
-
         request = ModelClassificationRequest(
             task=self.task,
             prompt=self.prompt,
@@ -109,6 +98,49 @@ class _DualProviderClassificationGate:
         primary = self._call_provider(self.primary, request, context, "primary")
         if isinstance(primary, GateResultEvidence):
             return primary
+
+        primary_evidence: dict[str, JsonValue] = {
+            "primary": _decision_evidence(self.primary, primary),
+        }
+        if primary.label not in self.allowed_labels:
+            return self._result(
+                context,
+                verdict=GateVerdict.REJECT,
+                score=0.0,
+                reason_code="MALFORMED_MODEL_DECISION",
+                evidence_payload=primary_evidence,
+            )
+
+        if primary.score >= self.pass_threshold:
+            return self._finalize_high_band(primary, context, primary_evidence)
+
+        if primary.score < self.verify_threshold:
+            return self._result(
+                context,
+                verdict=GateVerdict.REJECT,
+                score=primary.score,
+                reason_code=self.uncertain_reason,
+                evidence_payload=primary_evidence,
+            )
+
+        primary_identity = _provider_identity(self.primary, "primary")
+        verifier_identity = _provider_identity(self.verifier, "verifier")
+        if primary_identity == verifier_identity:
+            evidence_payload = dict(primary_evidence)
+            evidence_payload.update(
+                {
+                    "primary_identity": list(primary_identity),
+                    "verifier_identity": list(verifier_identity),
+                }
+            )
+            return self._result(
+                context,
+                verdict=GateVerdict.REJECT,
+                score=primary.score,
+                reason_code="VERIFIER_NOT_INDEPENDENT",
+                evidence_payload=evidence_payload,
+            )
+
         verifier = self._call_provider(self.verifier, request, context, "verifier")
         if isinstance(verifier, GateResultEvidence):
             return verifier
@@ -117,7 +149,7 @@ class _DualProviderClassificationGate:
             "primary": _decision_evidence(self.primary, primary),
             "verifier": _decision_evidence(self.verifier, verifier),
         }
-        if primary.label not in self.allowed_labels or verifier.label not in self.allowed_labels:
+        if verifier.label not in self.allowed_labels:
             return self._result(
                 context,
                 verdict=GateVerdict.REJECT,
@@ -125,6 +157,7 @@ class _DualProviderClassificationGate:
                 reason_code="MALFORMED_MODEL_DECISION",
                 evidence_payload=evidence_payload,
             )
+
         score = min(primary.score, verifier.score)
         if primary.label != verifier.label:
             return self._result(
@@ -134,30 +167,74 @@ class _DualProviderClassificationGate:
                 reason_code="MODEL_DECISION_CONFLICT",
                 evidence_payload=evidence_payload,
             )
+
+        if verifier.score < self.verify_threshold:
+            return self._result(
+                context,
+                verdict=GateVerdict.REJECT,
+                score=score,
+                reason_code=self.uncertain_reason,
+                evidence_payload=evidence_payload,
+            )
+
         if primary.label not in self.positive_labels:
             return self._result(
                 context,
                 verdict=GateVerdict.REJECT,
                 score=score,
-                reason_code=self.negative_reason,
+                reason_code=self._semantic_reject_reason(primary.label),
                 evidence_payload=evidence_payload,
             )
-        if score >= self.pass_threshold:
-            verdict = GateVerdict.PASS
-            reason_code = self.pass_reason
-        elif score >= self.verify_threshold:
-            verdict = GateVerdict.VERIFY
-            reason_code = self.verify_reason
-        else:
-            verdict = GateVerdict.REJECT
-            reason_code = self.low_confidence_reason
+
+        if not _has_content_evidence(primary) or not _has_content_evidence(verifier):
+            return self._result(
+                context,
+                verdict=GateVerdict.REJECT,
+                score=score,
+                reason_code=self.uncertain_reason,
+                evidence_payload=evidence_payload,
+            )
+
         return self._result(
             context,
-            verdict=verdict,
+            verdict=GateVerdict.VERIFY,
             score=score,
-            reason_code=reason_code,
+            reason_code=self.verify_reason,
             evidence_payload=evidence_payload,
         )
+
+    def _finalize_high_band(
+        self,
+        primary: ModelDecision,
+        context: GateContext,
+        evidence_payload: dict[str, JsonValue],
+    ) -> GateResultEvidence:
+        if primary.label not in self.positive_labels:
+            return self._result(
+                context,
+                verdict=GateVerdict.REJECT,
+                score=primary.score,
+                reason_code=self._semantic_reject_reason(primary.label),
+                evidence_payload=evidence_payload,
+            )
+        if not _has_content_evidence(primary):
+            return self._result(
+                context,
+                verdict=GateVerdict.REJECT,
+                score=primary.score,
+                reason_code=self.uncertain_reason,
+                evidence_payload=evidence_payload,
+            )
+        return self._result(
+            context,
+            verdict=GateVerdict.PASS,
+            score=primary.score,
+            reason_code=self.pass_reason,
+            evidence_payload=evidence_payload,
+        )
+
+    def _semantic_reject_reason(self, label: str) -> str:
+        return self.reject_reasons.get(label, self.uncertain_reason)
 
     def _call_provider(
         self,
@@ -223,8 +300,13 @@ class UniversityStemGate(_DualProviderClassificationGate):
     task = "gate_1_university_stem"
     allowed_labels = UNIVERSITY_LABELS
     positive_labels = frozenset({"UNIVERSITY_STEM"})
-    negative_reason = "NOT_UNIVERSITY_STEM"
-    low_confidence_reason = "UNIVERSITY_STEM_LOW_CONFIDENCE"
+    reject_reasons = {
+        "NON_STEM": "NON_STEM",
+        "NON_UNIVERSITY_STEM": "NOT_UNIVERSITY_LEVEL",
+        "K12": "NOT_UNIVERSITY_LEVEL",
+        "UNCERTAIN": "UNIVERSITY_LEVEL_UNCERTAIN",
+    }
+    uncertain_reason = "UNIVERSITY_LEVEL_UNCERTAIN"
     pass_reason = "UNIVERSITY_STEM_CONFIRMED"
     verify_reason = "UNIVERSITY_STEM_REVIEW_REQUIRED"
 
@@ -236,8 +318,11 @@ class ProblemGate(_DualProviderClassificationGate):
     task = "gate_2_problem"
     allowed_labels = PROBLEM_LABELS
     positive_labels = PROBLEM_POSITIVE_LABELS
-    negative_reason = "NOT_A_PROBLEM"
-    low_confidence_reason = "PROBLEM_LOW_CONFIDENCE"
+    reject_reasons = {
+        **{label: "NOT_PROBLEM" for label in PROBLEM_NEGATIVE_LABELS},
+        "UNCERTAIN": "PROBLEM_TYPE_UNCERTAIN",
+    }
+    uncertain_reason = "PROBLEM_TYPE_UNCERTAIN"
     pass_reason = "PROBLEM_CONFIRMED"
     verify_reason = "PROBLEM_REVIEW_REQUIRED"
 
@@ -278,3 +363,10 @@ def _decision_evidence(
         "reason_code": decision.reason_code,
         "evidence_references": list(decision.evidence_references),
     }
+
+
+def _has_content_evidence(decision: ModelDecision) -> bool:
+    return any(
+        reference.strip().lower().startswith(_CONTENT_EVIDENCE_PREFIXES)
+        for reference in decision.evidence_references
+    )
