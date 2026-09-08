@@ -120,8 +120,6 @@ class MissingIdentityGate:
 
     def __init__(self, missing: tuple[str, ...]) -> None:
         self._missing = missing
-        for attribute in missing:
-            delattr(self, attribute)
 
     def __getattribute__(self, name: str) -> object:
         if name in {"name", "provider", "model", "prompt_version"}:
