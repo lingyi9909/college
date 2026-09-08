@@ -96,7 +96,9 @@ def test_openai_compatible_adapter_rejects_malformed_model_decision() -> None:
         provider.classify(_request())
 
 
-def test_openai_compatible_adapter_requires_endpoint_and_model(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_openai_compatible_adapter_requires_endpoint_and_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("OPENAI_COMPATIBLE_BASE_URL", raising=False)
     monkeypatch.delenv("OPENAI_COMPATIBLE_MODEL", raising=False)
 
