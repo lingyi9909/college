@@ -113,6 +113,9 @@ class GateEngine[CandidateT]:
         candidate: CandidateT,
     ) -> GateResultEvidence:
         identity = _gate_identity(gate)
+        if identity is None:
+            return self._engine_reject("GATE_IDENTITY_MISSING")
+
         try:
             output = gate.evaluate(candidate, self._context)
         except Exception as exc:  # noqa: BLE001 - gate boundary must fail closed.
@@ -123,12 +126,9 @@ class GateEngine[CandidateT]:
             )
 
         try:
-            if isinstance(output, GateResultEvidence):
-                evidence = output
-            elif isinstance(output, GateEvidence):
-                evidence = GateResultEvidence.model_validate(output.model_dump(mode="python"))
-            else:
-                evidence = GateResultEvidence.model_validate(output)
+            if isinstance(output, GateEvidence):
+                output = output.model_dump(mode="python", warnings=False)
+            evidence = GateResultEvidence.model_validate(output)
         except (ValidationError, TypeError, ValueError):
             return self._reject_for_gate(
                 identity,
@@ -203,17 +203,23 @@ class _GateIdentity:
     prompt_version: str
 
 
-def _gate_identity(gate: object) -> _GateIdentity:
+def _gate_identity(gate: object) -> _GateIdentity | None:
+    name = _identity_value(gate, "name")
+    provider = _identity_value(gate, "provider")
+    model = _identity_value(gate, "model")
+    prompt_version = _identity_value(gate, "prompt_version")
+    if name is None or provider is None or model is None or prompt_version is None:
+        return None
     return _GateIdentity(
-        name=_identity_value(gate, "name", "unknown_gate"),
-        provider=_identity_value(gate, "provider", "unknown_provider"),
-        model=_identity_value(gate, "model", "unknown_model"),
-        prompt_version=_identity_value(gate, "prompt_version", "unknown_prompt"),
+        name=name,
+        provider=provider,
+        model=model,
+        prompt_version=prompt_version,
     )
 
 
-def _identity_value(gate: object, attribute: str, fallback: str) -> str:
+def _identity_value(gate: object, attribute: str) -> str | None:
     value = getattr(gate, attribute, None)
     if isinstance(value, str) and value.strip():
         return value
-    return fallback
+    return None
