@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from college_builder.domain.evidence import GateVerdict
 from college_builder.quality.engine import (
     GateContext,
@@ -110,6 +112,82 @@ class CountingGate(PassingGate):
         return super().evaluate(candidate, context)
 
 
+class MissingIdentityGate:
+    name = "gate_identity"
+    provider = "deterministic"
+    model = "identity_rule_v1"
+    prompt_version = "not_applicable"
+
+    def __init__(self, missing: tuple[str, ...]) -> None:
+        self._missing = missing
+
+    def __getattribute__(self, name: str) -> object:
+        if name in {"name", "provider", "model", "prompt_version"}:
+            missing = object.__getattribute__(self, "_missing")
+            if name in missing:
+                raise AttributeError(name)
+        return object.__getattribute__(self, name)
+
+    def evaluate(self, candidate: object, context: GateContext) -> object:
+        fallback = {
+            "name": "unknown_gate",
+            "provider": "unknown_provider",
+            "model": "unknown_model",
+            "prompt_version": "unknown_prompt",
+        }
+        identity = {
+            field: fallback[field] if field in self._missing else getattr(self, field)
+            for field in fallback
+        }
+        return {
+            "gate_name": identity["name"],
+            "verdict": "PASS",
+            "score": 1.0,
+            "provider": identity["provider"],
+            "model": identity["model"],
+            "prompt_version": identity["prompt_version"],
+            "config_version": context.config_version,
+            "reason_code": "SHOULD_NOT_PASS",
+            "evidence_payload": {},
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+
+class ConstructedMissingScoreGate(PassingGate):
+    name = "gate_construct_missing_score"
+
+    def evaluate(self, candidate: object, context: GateContext) -> GateResultEvidence:
+        return GateResultEvidence.model_construct(
+            gate_name=self.name,
+            verdict=GateVerdict.PASS,
+            provider=self.provider,
+            model=self.model,
+            prompt_version=self.prompt_version,
+            config_version=context.config_version,
+            reason_code="INVALID_CONSTRUCTED",
+            evidence_payload={},
+            timestamp=datetime.now(UTC),
+        )
+
+
+class ConstructedUnknownVerdictGate(PassingGate):
+    name = "gate_construct_unknown_verdict"
+
+    def evaluate(self, candidate: object, context: GateContext) -> GateResultEvidence:
+        return GateResultEvidence.model_construct(
+            gate_name=self.name,
+            verdict="MAYBE",
+            score=1.0,
+            provider=self.provider,
+            model=self.model,
+            prompt_version=self.prompt_version,
+            config_version=context.config_version,
+            reason_code="INVALID_CONSTRUCTED",
+            evidence_payload={},
+            timestamp=datetime.now(UTC),
+        )
+
+
 def _context() -> GateContext:
     return GateContext(config_version="pilot-v1")
 
@@ -172,3 +250,34 @@ def test_reject_short_circuits_later_gates() -> None:
     assert result.verdict is GateVerdict.REJECT
     assert later.calls == 0
     assert len(result.evidence) == 1
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        ("name",),
+        ("provider",),
+        ("model",),
+        ("prompt_version",),
+        ("name", "provider", "model", "prompt_version"),
+    ],
+)
+def test_missing_gate_execution_identity_fails_closed(missing: tuple[str, ...]) -> None:
+    result = GateEngine(gates=(MissingIdentityGate(missing),), context=_context()).run("candidate")
+
+    assert result.verdict is GateVerdict.REJECT
+    assert result.evidence[0].reason_code == "GATE_IDENTITY_MISSING"
+
+
+def test_model_construct_missing_score_fails_closed_to_reject() -> None:
+    result = GateEngine(gates=(ConstructedMissingScoreGate(),), context=_context()).run("candidate")
+
+    assert result.verdict is GateVerdict.REJECT
+    assert result.evidence[0].reason_code == "MALFORMED_GATE_OUTPUT"
+
+
+def test_model_construct_unknown_verdict_fails_closed_to_reject() -> None:
+    result = GateEngine(gates=(ConstructedUnknownVerdictGate(),), context=_context()).run("candidate")
+
+    assert result.verdict is GateVerdict.REJECT
+    assert result.evidence[0].reason_code == "MALFORMED_GATE_OUTPUT"
