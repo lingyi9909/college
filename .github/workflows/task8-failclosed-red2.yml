@@ -1,0 +1,23 @@
+name: Task 8 Fail-Closed RED Gate
+
+on:
+  push:
+    branches:
+      - verification/task8-failclosed-red2
+
+jobs:
+  verify-red:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout RED branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Run Task 8 RED regressions
+        run: pytest tests/unit/quality/test_engine.py -q
