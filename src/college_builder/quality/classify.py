@@ -126,8 +126,8 @@ class _DualProviderClassificationGate:
         primary_identity = _provider_identity(self.primary, "primary")
         verifier_identity = _provider_identity(self.verifier, "verifier")
         if primary_identity == verifier_identity:
-            evidence_payload = dict(primary_evidence)
-            evidence_payload.update(
+            identity_evidence = dict(primary_evidence)
+            identity_evidence.update(
                 {
                     "primary_identity": list(primary_identity),
                     "verifier_identity": list(verifier_identity),
@@ -138,7 +138,7 @@ class _DualProviderClassificationGate:
                 verdict=GateVerdict.REJECT,
                 score=primary.score,
                 reason_code="VERIFIER_NOT_INDEPENDENT",
-                evidence_payload=evidence_payload,
+                evidence_payload=identity_evidence,
             )
 
         verifier = self._call_provider(self.verifier, request, context, "verifier")
