@@ -12,7 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from college_builder.domain.final_record import slim_question_md5_v1
 from college_builder.domain.source import NormalizedQA
-from college_builder.providers.base import ModelClassificationRequest, StructuredModelProvider
+from college_builder.providers.base import (
+    ModelClassificationRequest,
+    ModelDecision,
+    StructuredModelProvider,
+)
 
 UnitScore = Annotated[float, Field(ge=0.0, le=1.0)]
 
@@ -117,10 +121,10 @@ class ExactDeduper:
             )
 
         final_kept = {item.candidate.record_id for item in kept_by_hash.values()}
+        dropped_id_set = set(dropped_ids)
         kept_ids = tuple(
             item.candidate.record_id for item in items if item.candidate.record_id in final_kept
         )
-        dropped_id_set = set(dropped_ids)
         ordered_dropped = tuple(
             item.candidate.record_id
             for item in items
@@ -258,13 +262,35 @@ class NearDuplicateIndex:
         )
 
         try:
-            verifier_decision = self._verifier.classify(request)
+            raw_decision: object = self._verifier.classify(request)
         except Exception:
             return _pair_evidence(
                 left,
                 right,
                 decision=DuplicateDecision.DIFFERENT,
                 decision_source="semantic_verifier_error",
+                retrieval_score=retrieval_score,
+                num_perm=self._num_perm,
+                prompt_version=self._prompt_version,
+                kept=(left.candidate.record_id, right.candidate.record_id),
+                dropped=(),
+                verifier_provider=self._provider,
+                verifier_model=self._model,
+                precomputed=(left_exact, right_exact, left_minhash, right_minhash),
+            )
+
+        try:
+            if not isinstance(raw_decision, ModelDecision):
+                raise TypeError("verifier returned non-ModelDecision output")
+            verifier_decision = ModelDecision.model_validate(
+                raw_decision.model_dump(mode="python")
+            )
+        except Exception:
+            return _pair_evidence(
+                left,
+                right,
+                decision=DuplicateDecision.DIFFERENT,
+                decision_source="semantic_verifier_malformed",
                 retrieval_score=retrieval_score,
                 num_perm=self._num_perm,
                 prompt_version=self._prompt_version,
