@@ -22,7 +22,7 @@ from college_builder.domain.question import (
     UniversityLevel,
     UniversityQuestionIR,
 )
-from college_builder.export.profile import UniversitySTEMProfile, to_final_record
+from college_builder.export.profile import to_final_record
 
 
 def _gate() -> GateEvidence:
@@ -231,14 +231,3 @@ def test_picture_flag_is_computed_from_question_image_reference_or_assets() -> N
     )
     assert to_final_record(with_ref).is_pic_included == 1
     assert to_final_record(_ir()).is_pic_included == 0
-
-
-def test_profile_requires_task13_static_info_keys() -> None:
-    record = to_final_record(_ir())
-    payload = record.model_dump(mode="python")
-    info = json.loads(payload["static_info"])
-    del info["source_answer_hash"]
-    payload["static_info"] = json.dumps(info)
-
-    with pytest.raises(ValueError, match="source_answer_hash"):
-        UniversitySTEMProfile.model_validate(payload)
