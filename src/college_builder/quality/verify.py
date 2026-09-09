@@ -304,14 +304,14 @@ class CorrectnessVerifier:
         request = _verification_request(self.name, self.prompt, candidate)
         decision, error = _call_and_validate(self.provider_impl, request)
         if error is not None:
-            payload = dict(error.payload)
-            payload["deterministic"] = deterministic_payload
+            error_payload = dict(error.payload)
+            error_payload["deterministic"] = deterministic_payload
             return self._result(
                 context,
                 verdict=GateVerdict.REJECT,
                 score=0.0,
                 reason_code=error.reason_code,
-                evidence_payload=payload,
+                evidence_payload=error_payload,
             )
         assert decision is not None
         if decision.label not in VERIFICATION_LABELS:
@@ -552,7 +552,8 @@ def _safe_sympify(text: str, *, allow_symbols: bool) -> object | None:
     if not stripped or allowed.fullmatch(stripped) is None:
         return None
     try:
-        return sympify(stripped.replace("^", "**"), evaluate=True)
+        parsed: object = sympify(stripped.replace("^", "**"), evaluate=True)
+        return parsed
     except Exception:  # noqa: BLE001 - unsupported syntax is simply not verified.
         return None
 
