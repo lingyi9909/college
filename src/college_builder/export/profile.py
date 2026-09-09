@@ -158,10 +158,6 @@ class UniversitySTEMProfile(FinalQuestionRecord):
             raise ValueError("static_info contract_version must be question_record_v1")
         if parsed.get("profile") != "university_stem_v1":
             raise ValueError("static_info profile must be university_stem_v1")
-        missing = STATIC_INFO_REQUIRED_KEYS.difference(parsed)
-        if missing:
-            missing_text = ", ".join(sorted(missing))
-            raise ValueError(f"static_info missing required keys: {missing_text}")
         return value
 
 
@@ -202,6 +198,8 @@ def to_final_record(ir: UniversityQuestionIR) -> FinalQuestionRecord:
         "course_name": ir.classification.course or "",
         "answer_source_span": ir.answer.source_span,
     }
+    if STATIC_INFO_REQUIRED_KEYS.difference(static_info):
+        raise ValueError("Task 13 static_info provenance is incomplete")
     text_paper = _source_title(ir)
 
     return UniversitySTEMProfile(
