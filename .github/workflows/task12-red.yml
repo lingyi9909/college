@@ -1,0 +1,25 @@
+name: Task 12 RED
+
+on:
+  push:
+    branches:
+      - verification/task12-red
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout tests-only SHA
+        uses: actions/checkout@v4
+        with:
+          ref: cc024e2be1a2c685f66becae6bf6035c0f1166e9
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Run Task 12 targeted tests
+        run: pytest tests/unit/quality/test_verify.py tests/golden -q
