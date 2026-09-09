@@ -1,0 +1,31 @@
+name: Task 12 GREEN Candidate 2
+
+on:
+  push:
+    branches:
+      - verification/task12-green2
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Task 12 candidate SHA
+        uses: actions/checkout@v4
+        with:
+          ref: 5d3a829c31987a2bf38137d9601ca50a15552c99
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Task 12 targeted tests
+        run: pytest tests/unit/quality/test_verify.py tests/golden -q
+      - name: Full test suite
+        run: pytest tests -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
