@@ -1,0 +1,29 @@
+name: Task 13 GREEN2
+on:
+  push:
+    branches:
+      - verification/task13-green2
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Task 13 candidate
+        uses: actions/checkout@v4
+        with:
+          ref: a7a0d0498e15b1a128336f53356c72082cf2b150
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Task 13 targeted tests
+        run: pytest tests/unit/export tests/e2e/test_final_export.py -q
+      - name: Full test suite
+        run: pytest tests -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
