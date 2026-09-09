@@ -1,0 +1,131 @@
+name: Task 11 Review Repair Exact HEAD
+
+on:
+  push:
+    branches:
+      - verification/task11-review-repair-exact-head
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact repaired Task 11 HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: 58341769a001fbd5ea9215320c3f6270d75ab16e
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Independent verifier-boundary acceptance
+        shell: bash
+        run: |
+          python - <<'PY'
+          from college_builder.domain.source import NormalizedQA
+          from college_builder.providers.base import ModelDecision
+          from college_builder.quality.dedup import DedupItem, DuplicateDecision, NearDuplicateIndex
+
+          def item(record_id, question, provenance=0.8, quality=0.8):
+              return DedupItem(
+                  candidate=NormalizedQA(
+                      record_id=record_id,
+                      source_record_id=f"raw-{record_id}",
+                      question=question,
+                      answer="4",
+                      analysis="The source analysis derives the answer.",
+                      subject_candidates=("mathematics",),
+                      images=(),
+                      metadata={},
+                      normalization_evidence={},
+                  ),
+                  provenance_score=provenance,
+                  quality_score=quality,
+              )
+
+          left = item("left", "Evaluate the limit of sin(x)/x as x approaches 0.", 0.7, 0.99)
+          right = item("right", "Find lim sin(x)/x for x tending to zero.", 0.95, 0.90)
+
+          class Provider:
+              provider = "acceptance"
+              model = "repair-v1"
+              def __init__(self, output=None, raises=False):
+                  self.output = output
+                  self.raises = raises
+              def classify(self, request):
+                  if self.raises:
+                      raise RuntimeError("provider failure")
+                  return self.output
+
+          def decide(output=None, raises=False, threshold=0.95):
+              return NearDuplicateIndex(
+                  retrieval_threshold=0.20,
+                  verifier=Provider(output, raises=raises),
+                  prompt="Classify duplicate relation only.",
+                  prompt_version="v1",
+                  num_perm=64,
+                  verifier_threshold=threshold,
+              ).decide_pair(left, right, semantic_similarity=0.99)
+
+          malformed = [
+              ModelDecision.model_construct(label="SAME_PROBLEM", score=0.99, evidence_references=(), reason_code="BYPASS"),
+              ModelDecision.model_construct(label="SAME_PROBLEM", score=2.0, evidence_references=("left:question", "right:question"), reason_code="BYPASS"),
+              ModelDecision.model_construct(label="SAME_PROBLEM", score=-0.01, evidence_references=("left:question", "right:question"), reason_code="BYPASS"),
+              ModelDecision.model_construct(label="   ", score=0.99, evidence_references=("left:question", "right:question"), reason_code="BYPASS"),
+              ModelDecision.model_construct(label="SAME_PROBLEM", score=0.99, evidence_references=("left:question", "right:question"), reason_code="   "),
+              {"label": "SAME_PROBLEM", "score": 0.99},
+              None,
+              object(),
+          ]
+          for idx, output in enumerate(malformed):
+              evidence = decide(output)
+              assert evidence.decision is DuplicateDecision.DIFFERENT, (idx, evidence)
+              assert evidence.decision_source == "semantic_verifier_malformed", (idx, evidence)
+              assert evidence.kept_record_ids == ("left", "right"), (idx, evidence)
+              assert evidence.dropped_record_ids == (), (idx, evidence)
+
+          provider_error = decide(raises=True)
+          assert provider_error.decision is DuplicateDecision.DIFFERENT
+          assert provider_error.decision_source == "semantic_verifier_error"
+          assert provider_error.dropped_record_ids == ()
+
+          same = decide(ModelDecision(label="SAME_PROBLEM", score=0.99, evidence_references=("left:question", "right:question"), reason_code="SAME"))
+          assert same.decision is DuplicateDecision.SAME_PROBLEM
+          assert same.kept_record_ids == ("right",)
+          assert same.dropped_record_ids == ("left",)
+          assert same.verifier_provider == "acceptance"
+          assert same.verifier_model == "repair-v1"
+          assert same.verifier_score == 0.99
+
+          variant = decide(ModelDecision(label="VARIANT", score=0.99, evidence_references=("left:question", "right:question"), reason_code="VARIANT"))
+          assert variant.decision is DuplicateDecision.VARIANT
+          assert variant.dropped_record_ids == ()
+
+          different = decide(ModelDecision(label="DIFFERENT", score=0.99, evidence_references=("left:question", "right:question"), reason_code="DIFFERENT"))
+          assert different.decision is DuplicateDecision.DIFFERENT
+          assert different.dropped_record_ids == ()
+
+          uncertain = decide(ModelDecision(label="UNCERTAIN", score=0.99, evidence_references=("left:question", "right:question"), reason_code="UNCERTAIN"))
+          assert uncertain.decision is DuplicateDecision.DIFFERENT
+          assert uncertain.decision_source == "semantic_verifier_uncertain"
+          assert uncertain.dropped_record_ids == ()
+
+          low_score_same = decide(ModelDecision(label="SAME_PROBLEM", score=0.94, evidence_references=("left:question", "right:question"), reason_code="LOW"))
+          assert low_score_same.decision is DuplicateDecision.DIFFERENT
+          assert low_score_same.decision_source == "semantic_verifier_uncertain"
+          assert low_score_same.dropped_record_ids == ()
+
+          print("TASK11_REPAIR_ACCEPTANCE_GREEN")
+          PY
+      - name: Task 11 targeted tests
+        run: pytest tests/unit/quality/test_dedup.py tests/golden -q
+      - name: Full test suite
+        run: pytest tests -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
