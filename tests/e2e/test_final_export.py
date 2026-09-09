@@ -36,7 +36,7 @@ def _ir(
         candidate_id=candidate_id,
         source_record_id=f"raw-{candidate_id}",
         question=QuestionContent(raw=question, normalized=question, assets=assets),
-        answer=AnswerContent(raw="5", final_answer="5", source_span="answer:0-1"),
+        answer=AnswerContent(raw="5", final_answer="5", source_span="answer:0:1"),
         analysis=AnalysisContent(
             raw="Adding two and three gives five.",
             type=AnalysisType.STEP_BY_STEP,
@@ -77,6 +77,12 @@ def _ir(
 
 def _read_jsonl(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _land_image(output: Path, relative: str) -> None:
+    target = output / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"fake-image")
 
 
 def test_export_jsonl_writes_only_exact_19_field_accepted_records(tmp_path: Path) -> None:
@@ -129,22 +135,8 @@ def test_non_accepted_terminal_or_intermediate_record_fails_closed_without_parti
     assert not (tmp_path / "questions.jsonl").exists()
 
 
-def test_missing_referenced_image_rejects_before_writing_jsonl(tmp_path: Path) -> None:
-    ir = _ir(
-        question='Use the figure. <img src="image/missing.png">',
-        assets=("image/missing.png",),
-    )
-
-    with pytest.raises(ValueError, match="image/missing.png"):
-        export_jsonl([ExportRecord(ir=ir, stage=RunStage.ACCEPTED)], tmp_path)
-
-    assert not (tmp_path / "questions.jsonl").exists()
-
-
-def test_existing_image_reference_exports_with_picture_flag(tmp_path: Path) -> None:
-    image_path = tmp_path / "image" / "diagram.png"
-    image_path.parent.mkdir(parents=True)
-    image_path.write_bytes(b"fake-image")
+def test_one_declared_asset_same_img_and_landed_file_exports(tmp_path: Path) -> None:
+    _land_image(tmp_path, "image/diagram.png")
     ir = _ir(
         question='Use the figure. <img src="image/diagram.png">',
         assets=("image/diagram.png",),
@@ -157,6 +149,92 @@ def test_existing_image_reference_exports_with_picture_flag(tmp_path: Path) -> N
 
     row = _read_jsonl(path)[0]
     assert row["is_pic_included"] == 1
+
+
+def test_declared_asset_without_question_img_placement_rejects(tmp_path: Path) -> None:
+    _land_image(tmp_path, "image/diagram.png")
+    ir = _ir(
+        question="Use the diagram to solve the problem.",
+        assets=("image/diagram.png",),
+    )
+
+    with pytest.raises(ValueError, match="image"):
+        export_jsonl([ExportRecord(ir=ir, stage=RunStage.ACCEPTED)], tmp_path)
+
+    assert not (tmp_path / "questions.jsonl").exists()
+
+
+def test_declared_asset_with_img_but_missing_file_rejects(tmp_path: Path) -> None:
+    ir = _ir(
+        question='Use the figure. <img src="image/missing.png">',
+        assets=("image/missing.png",),
+    )
+
+    with pytest.raises(ValueError, match="image/missing.png"):
+        export_jsonl([ExportRecord(ir=ir, stage=RunStage.ACCEPTED)], tmp_path)
+
+    assert not (tmp_path / "questions.jsonl").exists()
+
+
+def test_question_img_reference_not_declared_by_ir_asset_inventory_rejects(
+    tmp_path: Path,
+) -> None:
+    _land_image(tmp_path, "image/diagram.png")
+    ir = _ir(
+        question='Use the figure. <img src="image/diagram.png">',
+        assets=(),
+    )
+
+    with pytest.raises(ValueError, match="image"):
+        export_jsonl([ExportRecord(ir=ir, stage=RunStage.ACCEPTED)], tmp_path)
+
+    assert not (tmp_path / "questions.jsonl").exists()
+
+
+def test_declared_asset_and_final_reference_mismatch_rejects(tmp_path: Path) -> None:
+    _land_image(tmp_path, "image/declared.png")
+    _land_image(tmp_path, "image/placed.png")
+    ir = _ir(
+        question='Use the figure. <img src="image/placed.png">',
+        assets=("image/declared.png",),
+    )
+
+    with pytest.raises(ValueError, match="image"):
+        export_jsonl([ExportRecord(ir=ir, stage=RunStage.ACCEPTED)], tmp_path)
+
+    assert not (tmp_path / "questions.jsonl").exists()
+
+
+@pytest.mark.parametrize(
+    ("question", "assets"),
+    [
+        ('Use it. <img src="image/../escape.png">', ("image/../escape.png",)),
+        ('Use it. <img src="/tmp/escape.png">', ("/tmp/escape.png",)),
+    ],
+)
+def test_traversal_or_absolute_image_path_continues_to_reject(
+    tmp_path: Path,
+    question: str,
+    assets: tuple[str, ...],
+) -> None:
+    with pytest.raises(ValueError, match="image"):
+        export_jsonl(
+            [ExportRecord(ir=_ir(question=question, assets=assets), stage=RunStage.ACCEPTED)],
+            tmp_path,
+        )
+
+    assert not (tmp_path / "questions.jsonl").exists()
+
+
+def test_pure_text_empty_assets_and_no_img_exports_with_picture_flag_zero(
+    tmp_path: Path,
+) -> None:
+    path = export_jsonl(
+        [ExportRecord(ir=_ir(assets=()), stage=RunStage.ACCEPTED)],
+        tmp_path,
+    )
+
+    assert _read_jsonl(path)[0]["is_pic_included"] == 0
 
 
 def test_batch_validation_is_atomic_when_later_record_is_invalid(tmp_path: Path) -> None:
