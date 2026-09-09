@@ -20,9 +20,11 @@ from college_builder.providers.base import (
     ModelDecision,
     StructuredModelProvider,
 )
+from college_builder.quality.answer import AnswerExtraction, extract_source_answer
 from college_builder.quality.engine import GateContext, GateResultEvidence
 
 VERIFICATION_LABELS = ("PASS", "FAIL", "UNCERTAIN")
+_ANSWER_AUTHORITY_THRESHOLD = 0.995
 _SOURCE_SPAN_RE = re.compile(
     r"^(?P<field>question|answer|analysis):(?P<start>\d+)-(?P<end>\d+)$",
     re.IGNORECASE,
@@ -59,14 +61,22 @@ class DeterministicMathVerifier:
     """Conservatively verify safely parseable arithmetic and one-variable equations."""
 
     def verify(self, candidate: NormalizedQA) -> DeterministicVerificationResult:
+        extraction = extract_source_answer(candidate)
+        source_answer = _formal_final_answer(extraction)
+        if source_answer is None:
+            return DeterministicVerificationResult(
+                DeterministicVerificationStatus.NOT_VERIFIED,
+                "DETERMINISTIC_ANSWER_UNAVAILABLE",
+            )
+
         question = _strip_terminal_punctuation(candidate.question)
         arithmetic_match = _ARITHMETIC_PREFIX_RE.fullmatch(question)
         if arithmetic_match is not None:
-            return self._verify_arithmetic(arithmetic_match.group("expr"), candidate.answer)
+            return self._verify_arithmetic(arithmetic_match.group("expr"), source_answer)
 
         solve_match = _SOLVE_PREFIX_RE.fullmatch(question)
         if solve_match is not None:
-            return self._verify_equation(solve_match.group("equation"), candidate.answer)
+            return self._verify_equation(solve_match.group("equation"), source_answer)
 
         return DeterministicVerificationResult(
             DeterministicVerificationStatus.NOT_VERIFIED,
@@ -174,15 +184,29 @@ class AlignmentGate:
         self.pass_threshold = pass_threshold
 
     def evaluate(self, candidate: NormalizedQA, context: GateContext) -> GateResultEvidence:
-        request = _verification_request(self.name, self.prompt, candidate)
+        extraction = extract_source_answer(candidate)
+        authority_payload = _answer_authority_payload(extraction)
+        final_answer = _formal_final_answer(extraction)
+        if final_answer is None:
+            return self._result(
+                context,
+                verdict=GateVerdict.REJECT,
+                score=extraction.answer_extract_score,
+                reason_code=_answer_authority_reject_reason(extraction),
+                evidence_payload={"answer_authority": authority_payload},
+            )
+
+        request = _verification_request(self.name, self.prompt, candidate, final_answer)
         decision, error = _call_and_validate(self.provider_impl, request)
         if error is not None:
+            error_payload = dict(error.payload)
+            error_payload["answer_authority"] = authority_payload
             return self._result(
                 context,
                 verdict=GateVerdict.REJECT,
                 score=0.0,
                 reason_code=error.reason_code,
-                evidence_payload=error.payload,
+                evidence_payload=error_payload,
             )
         assert decision is not None
         if decision.label not in VERIFICATION_LABELS:
@@ -191,12 +215,17 @@ class AlignmentGate:
                 verdict=GateVerdict.REJECT,
                 score=0.0,
                 reason_code="MALFORMED_MODEL_DECISION",
-                evidence_payload={"provider": self.provider, "model": self.model},
+                evidence_payload={
+                    "provider": self.provider,
+                    "model": self.model,
+                    "answer_authority": authority_payload,
+                },
             )
 
         validated_refs, evidence_complete, invalid_ref_count = _validated_source_references(
             decision,
             candidate,
+            extraction,
         )
         alignment_payload: dict[str, JsonValue] = {
             "provider": self.provider,
@@ -208,7 +237,10 @@ class AlignmentGate:
         }
         if invalid_ref_count:
             alignment_payload["invalid_evidence_reference_count"] = invalid_ref_count
-        payload: dict[str, JsonValue] = {"alignment": alignment_payload}
+        payload: dict[str, JsonValue] = {
+            "answer_authority": authority_payload,
+            "alignment": alignment_payload,
+        }
         if not evidence_complete:
             return self._result(
                 context,
@@ -288,6 +320,18 @@ class CorrectnessVerifier:
         self.deterministic_verifier = deterministic_verifier or DeterministicMathVerifier()
 
     def evaluate(self, candidate: NormalizedQA, context: GateContext) -> GateResultEvidence:
+        extraction = extract_source_answer(candidate)
+        authority_payload = _answer_authority_payload(extraction)
+        final_answer = _formal_final_answer(extraction)
+        if final_answer is None:
+            return self._result(
+                context,
+                verdict=GateVerdict.REJECT,
+                score=extraction.answer_extract_score,
+                reason_code=_answer_authority_reject_reason(extraction),
+                evidence_payload={"answer_authority": authority_payload},
+            )
+
         deterministic = self.deterministic_verifier.verify(candidate)
         deterministic_payload: dict[str, JsonValue] = {
             "status": deterministic.status.value,
@@ -299,13 +343,17 @@ class CorrectnessVerifier:
                 verdict=GateVerdict.REJECT,
                 score=0.0,
                 reason_code="DETERMINISTIC_CORRECTNESS_MISMATCH",
-                evidence_payload={"deterministic": deterministic_payload},
+                evidence_payload={
+                    "answer_authority": authority_payload,
+                    "deterministic": deterministic_payload,
+                },
             )
 
-        request = _verification_request(self.name, self.prompt, candidate)
+        request = _verification_request(self.name, self.prompt, candidate, final_answer)
         decision, error = _call_and_validate(self.provider_impl, request)
         if error is not None:
             error_payload = dict(error.payload)
+            error_payload["answer_authority"] = authority_payload
             error_payload["deterministic"] = deterministic_payload
             return self._result(
                 context,
@@ -322,6 +370,7 @@ class CorrectnessVerifier:
                 score=0.0,
                 reason_code="MALFORMED_MODEL_DECISION",
                 evidence_payload={
+                    "answer_authority": authority_payload,
                     "deterministic": deterministic_payload,
                     "provider": self.provider,
                     "model": self.model,
@@ -336,6 +385,7 @@ class CorrectnessVerifier:
                 score=0.0,
                 reason_code="CALIBRATION_ERROR",
                 evidence_payload={
+                    "answer_authority": authority_payload,
                     "deterministic": deterministic_payload,
                     "provider": self.provider,
                     "model": self.model,
@@ -347,6 +397,7 @@ class CorrectnessVerifier:
         validated_refs, evidence_complete, invalid_ref_count = _validated_source_references(
             decision,
             candidate,
+            extraction,
         )
         verifier_payload: dict[str, JsonValue] = {
             "provider": self.provider,
@@ -361,6 +412,7 @@ class CorrectnessVerifier:
         if invalid_ref_count:
             verifier_payload["invalid_evidence_reference_count"] = invalid_ref_count
         payload: dict[str, JsonValue] = {
+            "answer_authority": authority_payload,
             "deterministic": deterministic_payload,
             "verifier": verifier_payload,
         }
@@ -477,13 +529,14 @@ def _verification_request(
     task: str,
     prompt: str,
     candidate: NormalizedQA,
+    final_answer: str,
 ) -> ModelClassificationRequest:
     return ModelClassificationRequest(
         task=task,
         prompt=prompt,
         inputs={
             "question": candidate.question,
-            "answer": candidate.answer,
+            "answer": final_answer,
             "analysis": candidate.analysis,
         },
         allowed_labels=VERIFICATION_LABELS,
@@ -510,16 +563,58 @@ def _identity_calibrator(score: float) -> float:
     return score
 
 
+def _formal_final_answer(extraction: AnswerExtraction) -> str | None:
+    if extraction.answer_extract_score < _ANSWER_AUTHORITY_THRESHOLD:
+        return None
+    if extraction.final_answer is None:
+        return None
+    if (
+        extraction.source_field is None
+        or extraction.start_offset is None
+        or extraction.end_offset is None
+        or extraction.source_span is None
+    ):
+        return None
+    return extraction.final_answer
+
+
+def _answer_authority_reject_reason(extraction: AnswerExtraction) -> str:
+    if not extraction.answer_source_exists:
+        return "ANSWER_MISSING"
+    return "ANSWER_NOT_EXTRACTABLE"
+
+
+def _answer_authority_payload(extraction: AnswerExtraction) -> dict[str, JsonValue]:
+    return {
+        "final_answer": extraction.final_answer,
+        "source_field": extraction.source_field,
+        "start_offset": extraction.start_offset,
+        "end_offset": extraction.end_offset,
+        "source_span": extraction.source_span,
+        "answer_source_exists": extraction.answer_source_exists,
+        "answer_extract_score": extraction.answer_extract_score,
+    }
+
+
 def _validated_source_references(
     decision: ModelDecision,
     candidate: NormalizedQA,
+    extraction: AnswerExtraction,
 ) -> tuple[tuple[str, ...], bool, int]:
     source = {
         "question": candidate.question,
         "answer": candidate.answer,
         "analysis": candidate.analysis,
     }
+    source_field = extraction.source_field
+    authority_start = extraction.start_offset
+    authority_end = extraction.end_offset
+    if source_field is None or authority_start is None or authority_end is None:
+        return (), False, len(decision.evidence_references)
+
+    required_fields = {"question", "analysis", source_field}
     covered: set[str] = set()
+    authority_covered = False
     validated: list[str] = []
     invalid_count = 0
     for reference in decision.evidence_references:
@@ -536,7 +631,13 @@ def _validated_source_references(
             continue
         validated.append(reference)
         covered.add(field)
-    complete = covered == set(source) and invalid_count == 0
+        if field == source_field and start <= authority_start and authority_end <= end:
+            authority_covered = True
+    complete = (
+        required_fields.issubset(covered)
+        and authority_covered
+        and invalid_count == 0
+    )
     return tuple(validated), complete, invalid_count
 
 
