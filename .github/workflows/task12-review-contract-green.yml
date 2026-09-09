@@ -1,0 +1,96 @@
+name: Task 12 Reviewer Contract GREEN
+
+on:
+  push:
+    branches:
+      - verification/task12-review-contract-green
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Task 12 answer-authority candidate
+        uses: actions/checkout@v4
+        with:
+          ref: e37810f4594f18ee32c5d520889117972c68132b
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Run reviewer extracted-answer continuity contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          from college_builder.domain.evidence import GateVerdict
+          from college_builder.domain.source import NormalizedQA
+          from college_builder.providers.base import ModelClassificationRequest, ModelDecision
+          from college_builder.quality.answer import extract_source_answer
+          from college_builder.quality.engine import GateContext, GateEngine
+          from college_builder.quality.verify import AlignmentGate, CorrectnessVerifier
+
+          def candidate(answer: str) -> NormalizedQA:
+              return NormalizedQA(
+                  record_id="norm-1",
+                  source_record_id="raw-1",
+                  question="Solve 2*x + 3 = 11.",
+                  answer=answer,
+                  analysis="Subtract 3 from both sides and divide by 2. Therefore x = 4",
+                  subject_candidates=("mathematics",),
+                  images=(),
+                  metadata={},
+                  normalization_evidence={},
+              )
+
+          class Provider:
+              provider = "acceptance"
+              model = "task12-v1"
+              def __init__(self):
+                  self.requests = []
+              def classify(self, request: ModelClassificationRequest) -> ModelDecision:
+                  self.requests.append(request)
+                  q = str(request.inputs["question"])
+                  analysis = str(request.inputs["analysis"])
+                  return ModelDecision(
+                      label="PASS",
+                      score=0.999,
+                      evidence_references=(
+                          f"question:0-{len(q)}",
+                          f"analysis:0-{len(analysis)}",
+                      ),
+                      reason_code="SOURCE_GROUNDED",
+                  )
+
+          for source_answer in ("", "See above"):
+              c = candidate(source_answer)
+              extraction = extract_source_answer(c)
+              assert extraction.final_answer == "x = 4"
+              assert extraction.source_field == "analysis"
+
+              ap = Provider()
+              arun = GateEngine(
+                  gates=(AlignmentGate(provider=ap, prompt="alignment", prompt_version="v1"),),
+                  context=GateContext(config_version="pilot-v1"),
+              ).run(c)
+              assert ap.requests[0].inputs["answer"] == extraction.final_answer
+              assert arun.verdict is GateVerdict.PASS, arun.evidence[0]
+
+              cp = Provider()
+              crun = GateEngine(
+                  gates=(CorrectnessVerifier(
+                      provider=cp,
+                      prompt="correctness",
+                      prompt_version="v1",
+                      calibration_id="identity-v1",
+                  ),),
+                  context=GateContext(config_version="pilot-v1"),
+              ).run(c)
+              assert cp.requests[0].inputs["answer"] == extraction.final_answer
+              assert crun.verdict is GateVerdict.PASS, crun.evidence[0]
+
+          print("TASK12_ACCEPTANCE_GREEN")
+          PY
