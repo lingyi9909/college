@@ -77,6 +77,20 @@ def test_answer_gate_never_infers_missing_result_from_analysis() -> None:
     assert evidence.evidence_payload["final_answer"] is None
 
 
+def test_referential_conclusion_is_not_treated_as_explicit_answer() -> None:
+    candidate = _candidate(
+        answer="",
+        analysis="After simplification, therefore the result shown above",
+    )
+
+    extraction = extract_source_answer(candidate)
+    evidence = _run(candidate)
+
+    assert extraction.final_answer is None
+    assert evidence.verdict is GateVerdict.REJECT
+    assert evidence.reason_code == "ANSWER_NOT_EXTRACTABLE"
+
+
 def test_answer_gate_rejects_when_source_answer_and_solution_are_missing() -> None:
     evidence = _run(_candidate(answer="", analysis=""))
 
