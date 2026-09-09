@@ -1,0 +1,19 @@
+name: Task 14 RED
+on:
+  push:
+    branches:
+      - verification/task14-red
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Task 14 tests-only candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 8362ded0f1c39f8d9f8bade3ede4761a511e68bf
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - run: git rev-parse HEAD
+      - run: pytest tests/e2e/test_pipeline_resume.py tests/e2e/test_pipeline_report.py -q
