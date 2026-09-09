@@ -1,0 +1,25 @@
+name: Task 12 Safe Parser RED
+
+on:
+  push:
+    branches:
+      - verification/task12-safe-parser-red
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout parser-regression SHA
+        uses: actions/checkout@v4
+        with:
+          ref: 18527aa1c52d1a52c8506002ab5d1a5e3df0c34c
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Prove function-call parser regression
+        run: pytest tests/unit/quality/test_verify.py::test_deterministic_function_calls_are_not_evaluated -q
