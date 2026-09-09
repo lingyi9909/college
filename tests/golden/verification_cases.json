@@ -1,0 +1,68 @@
+[
+  {
+    "id": "aligned-linear-equation",
+    "gate": "alignment",
+    "question": "Solve 2*x + 3 = 11.",
+    "answer": "x = 4",
+    "analysis": "Subtract 3 from both sides and divide by 2, so x = 4.",
+    "label": "PASS",
+    "score": 0.999,
+    "expected_verdict": "PASS",
+    "expected_reason": "QA_ALIGNMENT_CONFIRMED"
+  },
+  {
+    "id": "alignment-wrong-answer",
+    "gate": "alignment",
+    "question": "Solve 2*x + 3 = 11.",
+    "answer": "x = 5",
+    "analysis": "Subtract 3 from both sides and divide by 2, so x = 4.",
+    "label": "FAIL",
+    "score": 0.999,
+    "expected_verdict": "REJECT",
+    "expected_reason": "QA_ALIGNMENT_MISMATCH"
+  },
+  {
+    "id": "alignment-uncertain",
+    "gate": "alignment",
+    "question": "Explain the stability condition for this scheme.",
+    "answer": "Condition depends on the discretization.",
+    "analysis": "The source explanation is ambiguous about which scheme is used.",
+    "label": "UNCERTAIN",
+    "score": 0.97,
+    "expected_verdict": "REJECT",
+    "expected_reason": "QA_ALIGNMENT_UNCERTAIN"
+  },
+  {
+    "id": "correctness-pass",
+    "gate": "correctness",
+    "question": "Explain why the harmonic series diverges.",
+    "answer": "It diverges.",
+    "analysis": "Group terms in dyadic blocks; each block contributes at least one half.",
+    "label": "PASS",
+    "score": 0.99,
+    "expected_verdict": "PASS",
+    "expected_reason": "CORRECTNESS_CONFIRMED"
+  },
+  {
+    "id": "correctness-fail",
+    "gate": "correctness",
+    "question": "What is the derivative of x^2?",
+    "answer": "x",
+    "analysis": "Differentiate the power to get x.",
+    "label": "FAIL",
+    "score": 0.999,
+    "expected_verdict": "REJECT",
+    "expected_reason": "CORRECTNESS_MISMATCH"
+  },
+  {
+    "id": "correctness-uncertain",
+    "gate": "correctness",
+    "question": "Determine whether this nonlinear system is globally stable.",
+    "answer": "Yes.",
+    "analysis": "The source gives a local Lyapunov argument only.",
+    "label": "UNCERTAIN",
+    "score": 0.96,
+    "expected_verdict": "REJECT",
+    "expected_reason": "CORRECTNESS_UNCERTAIN"
+  }
+]
