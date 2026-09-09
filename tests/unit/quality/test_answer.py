@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from college_builder.domain.evidence import GateVerdict
 from college_builder.domain.source import NormalizedQA
 from college_builder.quality.answer import AnswerGate, extract_source_answer
@@ -89,6 +91,49 @@ def test_referential_conclusion_is_not_treated_as_explicit_answer() -> None:
     assert extraction.final_answer is None
     assert evidence.verdict is GateVerdict.REJECT
     assert evidence.reason_code == "ANSWER_NOT_EXTRACTABLE"
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "See above",
+        "See page 42.",
+        "https://example.com/answer",
+        "[answer](https://example.com/answer)",
+        "The result shown above",
+        "见上",
+        "见第42页",
+        "答案见上文",
+        "结果如上",
+    ],
+)
+def test_direct_answer_reference_or_placeholder_is_not_extractable(answer: str) -> None:
+    candidate = _candidate(
+        answer=answer,
+        analysis="Subtract 3 from both sides and divide by 2.",
+    )
+
+    extraction = extract_source_answer(candidate)
+    evidence = _run(candidate)
+
+    assert extraction.answer_source_exists is True
+    assert extraction.final_answer is None
+    assert extraction.source_span is None
+    assert evidence.verdict is GateVerdict.REJECT
+    assert evidence.reason_code == "ANSWER_NOT_EXTRACTABLE"
+
+
+def test_unextractable_direct_answer_does_not_break_explicit_analysis_conclusion() -> None:
+    analysis = "Subtract 3 from both sides and divide by 2; therefore x = 4"
+    candidate = _candidate(answer="See above", analysis=analysis)
+
+    extraction = extract_source_answer(candidate)
+    evidence = _run(candidate)
+
+    assert extraction.final_answer == "x = 4"
+    assert extraction.source_field == "analysis"
+    assert extraction.source_span == f"analysis:{analysis.index('x = 4')}:{len(analysis)}"
+    assert evidence.verdict is GateVerdict.PASS
 
 
 def test_answer_gate_rejects_when_source_answer_and_solution_are_missing() -> None:
