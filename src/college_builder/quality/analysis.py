@@ -26,6 +26,10 @@ _PAGE_ONLY_RE = re.compile(
     r"(?is)^\s*(?:see\s+)?(?:page\s*|p\.\s*)?\d+(?:\s*[-–]\s*\d+)?\.?\s*$"
 )
 _CN_PAGE_ONLY_RE = re.compile(r"^\s*第?\s*\d+\s*页\s*[。.]?\s*$")
+_ANSWER_ONLY_RE = re.compile(
+    r"(?is)^\s*(?:answer\s*[:：]|final\s+answer\s*[:：]|therefore|thus|hence|"
+    r"因此|所以|故)\s*(?P<answer>.+?)\s*$"
+)
 _SAME_AS_ABOVE = frozenset({"同上", "same as above", "as above"})
 
 
@@ -278,8 +282,18 @@ def _deterministic_reject_reason(candidate: NormalizedQA) -> str | None:
     stripped = candidate.analysis.strip()
     if not stripped or stripped == "略":
         return "ANALYSIS_MISSING"
-    if candidate.answer.strip() and stripped == candidate.answer.strip():
+
+    source_answer = candidate.answer.strip()
+    if source_answer and _canonical_answer(stripped) == _canonical_answer(source_answer):
         return "ANALYSIS_TOO_SHALLOW"
+    wrapped_answer = _answer_only_payload(stripped)
+    if (
+        source_answer
+        and wrapped_answer is not None
+        and _canonical_answer(wrapped_answer) == _canonical_answer(source_answer)
+    ):
+        return "ANALYSIS_TOO_SHALLOW"
+
     lowered = stripped.lower()
     if lowered in _SAME_AS_ABOVE:
         return "ANALYSIS_TOO_SHALLOW"
@@ -288,6 +302,19 @@ def _deterministic_reject_reason(candidate: NormalizedQA) -> str | None:
     if _PAGE_ONLY_RE.fullmatch(stripped) or _CN_PAGE_ONLY_RE.fullmatch(stripped):
         return "ANALYSIS_TOO_SHALLOW"
     return None
+
+
+def _answer_only_payload(text: str) -> str | None:
+    match = _ANSWER_ONLY_RE.fullmatch(text)
+    if match is None:
+        return None
+    payload = match.group("answer").strip()
+    return payload or None
+
+
+def _canonical_answer(text: str) -> str:
+    normalized = text.strip().rstrip(".。").strip().casefold()
+    return re.sub(r"\s+", "", normalized)
 
 
 def _semantic_reject_reason(label: str) -> str:
