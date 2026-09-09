@@ -397,9 +397,9 @@ def test_deterministic_arithmetic_confirms_without_modifying_source_answer() -> 
 
 def test_deterministic_function_calls_are_not_evaluated() -> None:
     candidate = _candidate(
-        question="Compute abs(-3).",
-        answer="3",
-        analysis="The source applies an absolute-value function.",
+        question="Solve sin(x) = 0.",
+        answer="x = 0",
+        analysis="The source gives a trigonometric root.",
     )
 
     result = DeterministicMathVerifier().verify(candidate)
