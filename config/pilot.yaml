@@ -1,0 +1,29 @@
+pipeline_version: university_dataset_builder_0.1.0
+config_version: pilot-v1
+profile: university_stem_v1
+thresholds:
+  university: 0.98
+  problem: 0.98
+  answer_extract: 0.995
+  analysis: 0.98
+  qa_alignment: 0.995
+providers:
+  classifier:
+    name: openai_compatible
+    model: pilot-classifier-v1
+  verifier:
+    name: openai_compatible
+    model: pilot-verifier-v1
+prompt_versions:
+  university_classify: v1
+  problem_classify: v1
+  analysis_classify: v1
+  qa_alignment: v1
+  correctness_verify: v1
+concurrency:
+  acquisition: 8
+  normalization: 16
+  rule_gate: 32
+  classifier: 16
+  verifier: 8
+  embedding_batch_workers: 4
