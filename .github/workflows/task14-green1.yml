@@ -1,0 +1,21 @@
+name: Task 14 GREEN1
+on:
+  push:
+    branches:
+      - verification/task14-green1
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Task 14 candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ea844ae52c03d40ca2be5e98d8308348e8b4375f
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - run: git rev-parse HEAD
+      - run: pytest tests/e2e/test_pipeline_resume.py tests/e2e/test_pipeline_report.py -q
+      - run: ruff check src tests
+      - run: mypy src
