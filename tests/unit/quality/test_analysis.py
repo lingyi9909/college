@@ -223,7 +223,8 @@ def test_analysis_positive_decision_requires_analysis_content_evidence() -> None
         )
     )
 
-    evidence = _run(\ate,
+    evidence = _run(
+        gate,
         _candidate(analysis="Subtract 3 and divide by 2, therefore x = 4."),
     )
 
