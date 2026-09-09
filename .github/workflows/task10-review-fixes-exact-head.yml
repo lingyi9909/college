@@ -1,0 +1,155 @@
+name: Task 10 Corrected Exact HEAD Gate
+
+on:
+  push:
+    branches:
+      - verification/task10-review-fixes-exact-head
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout corrected develop exact HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: d1f76561e9cc6292dc4e791e5be3efe7830fc209
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Task 10 targeted tests
+        run: pytest tests/unit/quality/test_answer.py tests/unit/quality/test_analysis.py tests/golden -q
+      - name: Full test suite
+        run: pytest tests -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
+      - name: Reviewer acceptance contracts
+        shell: bash
+        run: |
+          python - <<'PY'
+          from college_builder.domain.evidence import GateVerdict
+          from college_builder.domain.source import NormalizedQA
+          from college_builder.providers.base import ModelDecision
+          from college_builder.providers.fake import FakeStructuredModelProvider
+          from college_builder.quality.answer import AnswerGate
+          from college_builder.quality.analysis import AnalysisGate
+          from college_builder.quality.engine import GateContext, GateEngine
+
+          def candidate(*, answer: str, analysis: str) -> NormalizedQA:
+              return NormalizedQA(
+                  record_id="norm-acceptance",
+                  source_record_id="raw-acceptance",
+                  question="Solve 2x + 3 = 11.",
+                  answer=answer,
+                  analysis=analysis,
+                  subject_candidates=("mathematics",),
+                  images=(),
+                  metadata={},
+                  normalization_evidence={},
+              )
+
+          def run(gate, item):
+              return GateEngine(
+                  gates=(gate,),
+                  context=GateContext(config_version="pilot-v1"),
+              ).run(item).evidence[0]
+
+          for answer in (
+              "See above",
+              "See page 42.",
+              "https://example.com/answer",
+              "The result shown above",
+          ):
+              evidence = run(
+                  AnswerGate(),
+                  candidate(
+                      answer=answer,
+                      analysis="Subtract 3 from both sides and divide by 2.",
+                  ),
+              )
+              assert evidence.verdict is GateVerdict.REJECT
+              assert evidence.reason_code == "ANSWER_NOT_EXTRACTABLE"
+
+          answer_only = candidate(answer="", analysis="Therefore x = 4")
+          assert run(AnswerGate(), answer_only).verdict is GateVerdict.PASS
+
+          primary = FakeStructuredModelProvider(
+              provider="fake",
+              model="analysis-primary-v1",
+              decisions=(
+                  ModelDecision(
+                      label="DERIVATION",
+                      score=0.99,
+                      evidence_references=("analysis:0-15",),
+                      reason_code="ACCEPTANCE",
+                  ),
+              ),
+          )
+          verifier = FakeStructuredModelProvider(
+              provider="fake",
+              model="analysis-verifier-v2",
+              decisions=(),
+          )
+          evidence = run(
+              AnalysisGate(
+                  primary=primary,
+                  verifier=verifier,
+                  prompt="classification only",
+                  prompt_version="v1",
+              ),
+              answer_only,
+          )
+          assert evidence.verdict is GateVerdict.REJECT
+          assert evidence.reason_code == "ANALYSIS_TOO_SHALLOW"
+          assert not primary.requests
+          assert not verifier.requests
+
+          reasoning = candidate(
+              answer="x = 4",
+              analysis="Subtract 3 from both sides, then divide by 2 to obtain x = 4.",
+          )
+          for reference in (
+              "analysis:999-1000",
+              "analysis:20-10",
+              "analysis:-1-5",
+              "analysis:5-5",
+          ):
+              primary = FakeStructuredModelProvider(
+                  provider="fake",
+                  model="analysis-primary-v1",
+                  decisions=(
+                      ModelDecision(
+                          label="STEP_BY_STEP",
+                          score=0.99,
+                          evidence_references=(reference,),
+                          reason_code="ACCEPTANCE",
+                      ),
+                  ),
+              )
+              verifier = FakeStructuredModelProvider(
+                  provider="fake",
+                  model="analysis-verifier-v2",
+                  decisions=(),
+              )
+              evidence = run(
+                  AnalysisGate(
+                      primary=primary,
+                      verifier=verifier,
+                      prompt="classification only",
+                      prompt_version="v1",
+                  ),
+                  reasoning,
+              )
+              assert evidence.verdict is GateVerdict.REJECT
+
+          print("TASK10_ACCEPTANCE_GREEN")
+          PY
