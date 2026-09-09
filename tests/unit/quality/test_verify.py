@@ -298,7 +298,6 @@ def test_correctness_fail_or_uncertain_rejects(label: str, reason: str) -> None:
 
     assert evidence.verdict is GateVerdict.REJECT
     assert evidence.reason_code == reason
-    assert evidence.dropped_record_ids if False else True
 
 
 def test_correctness_pass_requires_source_evidence_and_never_accepts_generated_solution() -> None:
