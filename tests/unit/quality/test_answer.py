@@ -42,7 +42,8 @@ def test_literal_source_answer_is_extracted_with_exact_span_evidence() -> None:
     assert extraction.source_field == "answer"
     assert extraction.start_offset == 2
     assert extraction.end_offset == 7
-    assert candidate.answer[extraction.start_offset : extraction.end_offset] == extraction.final_answer
+    source_answer = candidate.answer[extraction.start_offset : extraction.end_offset]
+    assert source_answer == extraction.final_answer
     assert extraction.source_span == "answer:2:7"
     assert extraction.answer_extract_score == 1.0
 
