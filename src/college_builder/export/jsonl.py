@@ -9,7 +9,7 @@ from pathlib import Path
 
 from college_builder.domain.final_record import FinalQuestionRecord
 from college_builder.domain.question import UniversityQuestionIR
-from college_builder.export.profile import image_references, to_final_record
+from college_builder.export.profile import to_final_record
 from college_builder.storage.state import RunStage
 
 
@@ -32,7 +32,7 @@ def export_jsonl(records: Iterable[ExportRecord], output_dir: Path) -> Path:
                 f"record {item.ir.candidate_id} must be terminal ACCEPTED before export"
             )
         final_record = to_final_record(item.ir)
-        _validate_image_targets(final_record, destination)
+        _validate_image_targets(item.ir, destination)
         prepared.append(_serialize(final_record))
 
     destination.mkdir(parents=True, exist_ok=True)
@@ -52,11 +52,11 @@ def _serialize(record: FinalQuestionRecord) -> str:
     return json.dumps(ordered, ensure_ascii=False, separators=(",", ":"))
 
 
-def _validate_image_targets(record: FinalQuestionRecord, output_dir: Path) -> None:
-    for reference in image_references(record.text_question):
+def _validate_image_targets(ir: UniversityQuestionIR, output_dir: Path) -> None:
+    for reference in ir.question.assets:
         relative = Path(reference)
         if relative.is_absolute() or ".." in relative.parts:
             raise ValueError(f"invalid image reference: {reference}")
         target = output_dir / relative
         if not target.is_file():
-            raise ValueError(f"referenced image is missing from export output: {reference}")
+            raise ValueError(f"declared image is missing from export output: {reference}")

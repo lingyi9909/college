@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import field_validator
@@ -94,9 +95,12 @@ STATIC_INFO_REQUIRED_KEYS: frozenset[str] = frozenset(
         "quality_tier",
     }
 )
-_IMAGE_REF_RE = re.compile(
-    r"<img\b[^>]*\bsrc\s*=\s*['\"](?P<src>image/[^'\"]+)['\"][^>]*>",
+_IMAGE_SRC_RE = re.compile(
+    r"<img\b[^>]*\bsrc\s*=\s*['\"](?P<src>[^'\"]+)['\"][^>]*>",
     re.IGNORECASE,
+)
+_SOURCE_SPAN_RE = re.compile(
+    r"^(?P<field>answer|analysis):(?P<start>\d+):(?P<end>\d+)$"
 )
 _DISCIPLINE_TO_COURSE: dict[Discipline, UniversityCourse] = {
     Discipline.MATHEMATICS: "数学",
@@ -162,8 +166,12 @@ class UniversitySTEMProfile(FinalQuestionRecord):
 
 
 def image_references(text: str) -> tuple[str, ...]:
-    """Return image/... references in final-question order without rewriting content."""
-    return tuple(match.group("src") for match in _IMAGE_REF_RE.finditer(text))
+    """Return formal image/... references in final-question order."""
+    return tuple(
+        source
+        for source in _all_image_sources(text)
+        if source.startswith("image/")
+    )
 
 
 def to_final_record(ir: UniversityQuestionIR) -> FinalQuestionRecord:
@@ -176,11 +184,11 @@ def to_final_record(ir: UniversityQuestionIR) -> FinalQuestionRecord:
     if final_answer is None or not final_answer.strip():
         raise ValueError("formal export requires source-grounded final_answer")
     if ir.answer.source_span is None or not ir.answer.source_span.strip():
-        raise ValueError("formal export requires final_answer source_span")
+        raise ValueError("formal export requires final_answer source span")
 
+    source_answer_text = _validated_answer_authority_source_text(ir, final_answer)
     question_text = ir.question.normalized
-    references = image_references(question_text)
-    source_answer_text = _answer_authority_source_text(ir)
+    references = _validate_image_inventory(question_text, ir.question.assets)
     static_info = {
         "slim_question_md5": slim_question_md5_v1(question_text),
         "copyright": "0",
@@ -204,7 +212,7 @@ def to_final_record(ir: UniversityQuestionIR) -> FinalQuestionRecord:
 
     return UniversitySTEMProfile(
         text_question=question_text,
-        is_pic_included=1 if references or ir.question.assets else 0,
+        is_pic_included=1 if references else 0,
         text_answer=final_answer,
         answer_analysis=ir.analysis.raw,
         text_course=text_course,
@@ -254,15 +262,63 @@ def _source_title(ir: UniversityQuestionIR) -> str:
     return ir.provenance.source_dataset
 
 
-def _answer_authority_source_text(ir: UniversityQuestionIR) -> str:
+def _validated_answer_authority_source_text(
+    ir: UniversityQuestionIR,
+    final_answer: str,
+) -> str:
     span = ir.answer.source_span
     assert span is not None
-    normalized = span.strip().lower()
-    if normalized.startswith("answer:"):
-        return ir.answer.raw
-    if normalized.startswith("analysis:"):
-        return ir.analysis.raw
-    raise ValueError("final_answer source_span must identify answer or analysis source")
+    match = _SOURCE_SPAN_RE.fullmatch(span)
+    if match is None:
+        raise ValueError(
+            "final_answer source span must use "
+            "answer:<start>:<end> or analysis:<start>:<end>"
+        )
+
+    source_field = match.group("field")
+    source_text = ir.answer.raw if source_field == "answer" else ir.analysis.raw
+    start = int(match.group("start"))
+    end = int(match.group("end"))
+    if not 0 <= start < end <= len(source_text):
+        raise ValueError("final_answer source span is empty, reversed, or out of range")
+
+    source_slice = source_text[start:end]
+    if not source_slice:
+        raise ValueError("final_answer source span must resolve to non-empty source text")
+    if source_slice != final_answer:
+        raise ValueError("final_answer does not match its authorized source span")
+    return source_text
+
+
+def _all_image_sources(text: str) -> tuple[str, ...]:
+    return tuple(match.group("src") for match in _IMAGE_SRC_RE.finditer(text))
+
+
+def _validate_image_inventory(
+    question_text: str,
+    declared_assets: tuple[str, ...],
+) -> tuple[str, ...]:
+    placed_sources = _all_image_sources(question_text)
+    for path in (*declared_assets, *placed_sources):
+        _validate_formal_image_path(path)
+
+    if set(declared_assets) != set(placed_sources):
+        raise ValueError(
+            "declared image assets must exactly match final question image references"
+        )
+    return placed_sources
+
+
+def _validate_formal_image_path(path: str) -> None:
+    pure = PurePosixPath(path)
+    if (
+        pure.is_absolute()
+        or len(pure.parts) < 2
+        or pure.parts[0] != "image"
+        or ".." in pure.parts
+        or not path.startswith("image/")
+    ):
+        raise ValueError(f"invalid formal image path: {path}")
 
 
 def _sha256(text: str) -> str:
