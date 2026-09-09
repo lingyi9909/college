@@ -1,0 +1,23 @@
+name: Task 13 RED
+on:
+  push:
+    branches:
+      - verification/task13-red
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Task 13 tests-only SHA
+        uses: actions/checkout@v4
+        with:
+          ref: 0bb9b70b1732ba193dc0d3d61e4ce9c2a705c9a8
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Run Task 13 RED tests
+        run: pytest tests/unit/export/test_jsonl.py tests/e2e/test_final_export.py -q
