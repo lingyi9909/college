@@ -85,7 +85,7 @@ class DeterministicMathVerifier:
                 "DETERMINISTIC_PARSE_UNAVAILABLE",
             )
         try:
-            matches = simplify(expected - answer) == 0
+            matches = simplify(expected - answer) == 0  # type: ignore[operator]
         except Exception:  # noqa: BLE001 - unsupported SymPy object is not a contradiction.
             return DeterministicVerificationResult(
                 DeterministicVerificationStatus.NOT_VERIFIED,
@@ -117,7 +117,7 @@ class DeterministicMathVerifier:
                 "DETERMINISTIC_PARSE_UNAVAILABLE",
             )
         try:
-            expression = left - right
+            expression = left - right  # type: ignore[operator]
             symbols = tuple(expression.free_symbols)
         except Exception:  # noqa: BLE001 - fail open to independent verifier, never correct.
             return DeterministicVerificationResult(
@@ -193,16 +193,22 @@ class AlignmentGate:
                 evidence_payload={"provider": self.provider, "model": self.model},
             )
 
+        validated_refs, evidence_complete, invalid_ref_count = _validated_source_references(
+            decision,
+            candidate,
+        )
         alignment_payload: dict[str, JsonValue] = {
             "provider": self.provider,
             "model": self.model,
             "verdict": decision.label,
             "alignment_score": decision.score,
             "reason_code": decision.reason_code,
-            "evidence_references": list(decision.evidence_references),
+            "evidence_references": list(validated_refs),
         }
+        if invalid_ref_count:
+            alignment_payload["invalid_evidence_reference_count"] = invalid_ref_count
         payload: dict[str, JsonValue] = {"alignment": alignment_payload}
-        if not _has_all_source_spans(decision, candidate):
+        if not evidence_complete:
             return self._result(
                 context,
                 verdict=GateVerdict.REJECT,
@@ -337,6 +343,10 @@ class CorrectnessVerifier:
                 },
             )
 
+        validated_refs, evidence_complete, invalid_ref_count = _validated_source_references(
+            decision,
+            candidate,
+        )
         verifier_payload: dict[str, JsonValue] = {
             "provider": self.provider,
             "model": self.model,
@@ -345,13 +355,15 @@ class CorrectnessVerifier:
             "calibrated_score": calibrated_score,
             "calibration_id": self.calibration_id,
             "reason_code": decision.reason_code,
-            "evidence_references": list(decision.evidence_references),
+            "evidence_references": list(validated_refs),
         }
+        if invalid_ref_count:
+            verifier_payload["invalid_evidence_reference_count"] = invalid_ref_count
         payload: dict[str, JsonValue] = {
             "deterministic": deterministic_payload,
             "verifier": verifier_payload,
         }
-        if not _has_all_source_spans(decision, candidate):
+        if not evidence_complete:
             return self._result(
                 context,
                 verdict=GateVerdict.REJECT,
@@ -497,24 +509,34 @@ def _identity_calibrator(score: float) -> float:
     return score
 
 
-def _has_all_source_spans(decision: ModelDecision, candidate: NormalizedQA) -> bool:
+def _validated_source_references(
+    decision: ModelDecision,
+    candidate: NormalizedQA,
+) -> tuple[tuple[str, ...], bool, int]:
     source = {
         "question": candidate.question,
         "answer": candidate.answer,
         "analysis": candidate.analysis,
     }
     covered: set[str] = set()
+    validated: list[str] = []
+    invalid_count = 0
     for reference in decision.evidence_references:
         match = _SOURCE_SPAN_RE.fullmatch(reference.strip())
         if match is None:
+            invalid_count += 1
             continue
         field = match.group("field").lower()
         text = source[field]
         start = int(match.group("start"))
         end = int(match.group("end"))
-        if 0 <= start < end <= len(text) and text[start:end].strip():
-            covered.add(field)
-    return covered == set(source)
+        if not (0 <= start < end <= len(text) and text[start:end].strip()):
+            invalid_count += 1
+            continue
+        validated.append(reference)
+        covered.add(field)
+    complete = covered == set(source) and invalid_count == 0
+    return tuple(validated), complete, invalid_count
 
 
 def _strip_terminal_punctuation(text: str) -> str:
