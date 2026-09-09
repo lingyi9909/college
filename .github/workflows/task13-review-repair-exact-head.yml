@@ -1,0 +1,159 @@
+name: Task 13 Reviewer Repair Exact HEAD
+
+on:
+  push:
+    branches:
+      - verification/task13-review-repair-exact-head
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact Task 13 develop HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: b9aac953c1574563a4dfbc53ee4e41e6726b2329
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Reviewer source traceability and image inventory contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+
+          from college_builder.domain.evidence import GateEvidence, GateVerdict
+          from college_builder.domain.final_record import slim_question_md5_v1
+          from college_builder.domain.question import (
+              AnalysisContent, AnalysisType, AnswerContent, Classification,
+              DedupState, Discipline, ProblemType, QualityState, QuestionContent,
+              QuestionMetadata, QuestionProvenance, UniversityLevel, UniversityQuestionIR,
+          )
+          from college_builder.export.jsonl import ExportRecord, export_jsonl
+          from college_builder.export.profile import to_final_record
+          from college_builder.storage.state import RunStage
+
+          ANALYSIS = "Subtract 3 from both sides and divide by 2. Therefore x = 4"
+
+          def ir(*, raw_answer="x = 4", final_answer="x = 4", source_span="answer:0:5", question="Solve 2*x + 3 = 11.", assets=()):
+              return UniversityQuestionIR(
+                  candidate_id="candidate-1",
+                  source_record_id="raw-1",
+                  question=QuestionContent(raw=question, normalized=question, assets=assets),
+                  answer=AnswerContent(raw=raw_answer, final_answer=final_answer, source_span=source_span),
+                  analysis=AnalysisContent(raw=ANALYSIS, type=AnalysisType.DERIVATION),
+                  classification=Classification(
+                      discipline=Discipline.MATHEMATICS,
+                      course="Linear Algebra",
+                      level=UniversityLevel.UNDERGRADUATE,
+                      problem_type=ProblemType.CALCULATION,
+                  ),
+                  metadata=QuestionMetadata(
+                      knowledge_points=("linear equations",),
+                      exam_points=("equation solving",),
+                      language="en",
+                  ),
+                  quality=QualityState(gates=(GateEvidence(
+                      gate_name="independent_correctness_verification",
+                      verdict=GateVerdict.PASS,
+                      score=0.999,
+                      provider="review",
+                      model="review-v1",
+                      prompt_version="v1",
+                      config_version="pilot-v1",
+                  ),)),
+                  provenance=QuestionProvenance(
+                      source_dataset="stackmathqa",
+                      source_id="42",
+                      source_url="https://math.stackexchange.com/questions/42",
+                      raw_sha256="a" * 64,
+                  ),
+                  dedup=DedupState(exact_hash=slim_question_md5_v1(question)),
+              )
+
+          # Valid Gate 3 canonical authority spans still pass.
+          assert to_final_record(ir()).text_answer == "x = 4"
+          start = ANALYSIS.index("x = 4")
+          analysis_ir = ir(raw_answer="See above", source_span=f"analysis:{start}:{start + 5}")
+          assert to_final_record(analysis_ir).text_answer == "x = 4"
+
+          # All untraceable/malformed authorities must fail closed.
+          invalid = (
+              ir(raw_answer="x = 4", final_answer="x = 5", source_span="answer:0:5"),
+              ir(source_span="answer:999:1000"),
+              ir(source_span="answer:0:0"),
+              ir(source_span="answer:5:0"),
+              ir(source_span="answer:0-5"),
+              ir(source_span="question:0:5"),
+              ir(raw_answer="See above", source_span="analysis:0:3"),
+          )
+          for bad in invalid:
+              try:
+                  to_final_record(bad)
+              except ValueError:
+                  pass
+              else:
+                  raise AssertionError(f"untraceable answer exported: {bad.answer}")
+
+          with TemporaryDirectory() as td:
+              output = Path(td)
+              image = output / "image" / "diagram.png"
+              image.parent.mkdir(parents=True)
+              image.write_bytes(b"fake-image")
+
+              good = ir(
+                  question='Use the figure. <img src="image/diagram.png">',
+                  assets=("image/diagram.png",),
+              )
+              path = export_jsonl([ExportRecord(ir=good, stage=RunStage.ACCEPTED)], output)
+              assert path.is_file()
+
+          image_bad_cases = (
+              ir(question="Use the diagram.", assets=("image/missing.png",)),
+              ir(question='<img src="image/missing.png">', assets=("image/missing.png",)),
+              ir(question='<img src="image/undeclared.png">', assets=()),
+              ir(question='<img src="image/placed.png">', assets=("image/declared.png",)),
+              ir(question='<img src="image/../escape.png">', assets=("image/../escape.png",)),
+              ir(question='<img src="/tmp/escape.png">', assets=("/tmp/escape.png",)),
+          )
+          for bad in image_bad_cases:
+              with TemporaryDirectory() as td:
+                  output = Path(td)
+                  # Land any declared non-traversal asset so placement/inventory, not file absence,
+                  # is what decides mismatch cases where applicable.
+                  for rel in bad.question.assets:
+                      if rel.startswith("image/") and ".." not in Path(rel).parts:
+                          target = output / rel
+                          target.parent.mkdir(parents=True, exist_ok=True)
+                          target.write_bytes(b"fake-image")
+                  try:
+                      export_jsonl([ExportRecord(ir=bad, stage=RunStage.ACCEPTED)], output)
+                  except ValueError:
+                      pass
+                  else:
+                      raise AssertionError(f"invalid image inventory exported: {bad.question}")
+
+          with TemporaryDirectory() as td:
+              text_only = ir(question="Pure text question.", assets=())
+              path = export_jsonl([ExportRecord(ir=text_only, stage=RunStage.ACCEPTED)], Path(td))
+              assert path.is_file()
+
+          print("TASK13_REVIEWER_CONTRACT_GREEN")
+          PY
+      - name: Task 13 targeted tests
+        run: pytest tests/unit/export tests/e2e/test_final_export.py -q
+      - name: Full test suite
+        run: pytest tests -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
