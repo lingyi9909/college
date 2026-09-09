@@ -16,6 +16,10 @@ _CONCLUSION_RE = re.compile(
     r"(?is)(?:therefore|thus|hence|final\s+answer\s*[:：]|answer\s*[:：]|因此|所以|故)\s*"
     r"(?P<answer>[^\n]+?)\s*$"
 )
+_REFERENTIAL_ANSWER_RE = re.compile(
+    r"(?is)(?:\b(?:shown|given|stated)\s+above\b|\b(?:see|refer\s+to)\b|"
+    r"(?:如上|上述|上面|见上))"
+)
 _PLACEHOLDERS = frozenset({"略"})
 
 
@@ -205,7 +209,7 @@ def _conclusion_span(text: str) -> tuple[int, int, str] | None:
     if start >= end:
         return None
     answer = text[start:end]
-    if answer in _PLACEHOLDERS:
+    if answer in _PLACEHOLDERS or _REFERENTIAL_ANSWER_RE.search(answer):
         return None
     return start, end, answer
 
