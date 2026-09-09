@@ -270,7 +270,10 @@ def _validated_answer_authority_source_text(
     assert span is not None
     match = _SOURCE_SPAN_RE.fullmatch(span)
     if match is None:
-        raise ValueError("final_answer source span must use answer:<start>:<end> or analysis:<start>:<end>")
+        raise ValueError(
+            "final_answer source span must use "
+            "answer:<start>:<end> or analysis:<start>:<end>"
+        )
 
     source_field = match.group("field")
     source_text = ir.answer.raw if source_field == "answer" else ir.analysis.raw
