@@ -46,57 +46,37 @@ jobs:
 
           def ir(*, raw_answer="x = 4", final_answer="x = 4", source_span="answer:0:5", question="Solve 2*x + 3 = 11.", assets=()):
               return UniversityQuestionIR(
-                  candidate_id="candidate-1",
-                  source_record_id="raw-1",
+                  candidate_id="candidate-1", source_record_id="raw-1",
                   question=QuestionContent(raw=question, normalized=question, assets=assets),
                   answer=AnswerContent(raw=raw_answer, final_answer=final_answer, source_span=source_span),
                   analysis=AnalysisContent(raw=ANALYSIS, type=AnalysisType.DERIVATION),
                   classification=Classification(
-                      discipline=Discipline.MATHEMATICS,
-                      course="Linear Algebra",
-                      level=UniversityLevel.UNDERGRADUATE,
-                      problem_type=ProblemType.CALCULATION,
+                      discipline=Discipline.MATHEMATICS, course="Linear Algebra",
+                      level=UniversityLevel.UNDERGRADUATE, problem_type=ProblemType.CALCULATION,
                   ),
-                  metadata=QuestionMetadata(
-                      knowledge_points=("linear equations",),
-                      exam_points=("equation solving",),
-                      language="en",
-                  ),
+                  metadata=QuestionMetadata(knowledge_points=("linear equations",), exam_points=("equation solving",), language="en"),
                   quality=QualityState(gates=(GateEvidence(
-                      gate_name="independent_correctness_verification",
-                      verdict=GateVerdict.PASS,
-                      score=0.999,
-                      provider="review",
-                      model="review-v1",
-                      prompt_version="v1",
-                      config_version="pilot-v1",
+                      gate_name="independent_correctness_verification", verdict=GateVerdict.PASS,
+                      score=0.999, provider="review", model="review-v1",
+                      prompt_version="v1", config_version="pilot-v1",
                   ),)),
                   provenance=QuestionProvenance(
-                      source_dataset="stackmathqa",
-                      source_id="42",
-                      source_url="https://math.stackexchange.com/questions/42",
-                      raw_sha256="a" * 64,
+                      source_dataset="stackmathqa", source_id="42",
+                      source_url="https://math.stackexchange.com/questions/42", raw_sha256="a" * 64,
                   ),
                   dedup=DedupState(exact_hash=slim_question_md5_v1(question)),
               )
 
-          # Valid Gate 3 canonical authority spans still pass.
           assert to_final_record(ir()).text_answer == "x = 4"
           start = ANALYSIS.index("x = 4")
-          analysis_ir = ir(raw_answer="See above", source_span=f"analysis:{start}:{start + 5}")
-          assert to_final_record(analysis_ir).text_answer == "x = 4"
+          assert to_final_record(ir(raw_answer="See above", source_span=f"analysis:{start}:{start + 5}")).text_answer == "x = 4"
 
-          # All untraceable/malformed authorities must fail closed.
-          invalid = (
+          for bad in (
               ir(raw_answer="x = 4", final_answer="x = 5", source_span="answer:0:5"),
-              ir(source_span="answer:999:1000"),
-              ir(source_span="answer:0:0"),
-              ir(source_span="answer:5:0"),
-              ir(source_span="answer:0-5"),
-              ir(source_span="question:0:5"),
-              ir(raw_answer="See above", source_span="analysis:0:3"),
-          )
-          for bad in invalid:
+              ir(source_span="answer:999:1000"), ir(source_span="answer:0:0"),
+              ir(source_span="answer:5:0"), ir(source_span="answer:0-5"),
+              ir(source_span="question:0:5"), ir(raw_answer="See above", source_span="analysis:0:3"),
+          ):
               try:
                   to_final_record(bad)
               except ValueError:
@@ -106,30 +86,22 @@ jobs:
 
           with TemporaryDirectory() as td:
               output = Path(td)
-              image = output / "image" / "diagram.png"
-              image.parent.mkdir(parents=True)
-              image.write_bytes(b"fake-image")
+              target = output / "image" / "diagram.png"
+              target.parent.mkdir(parents=True)
+              target.write_bytes(b"fake-image")
+              good = ir(question='Use the figure. <img src="image/diagram.png">', assets=("image/diagram.png",))
+              assert export_jsonl([ExportRecord(ir=good, stage=RunStage.ACCEPTED)], output).is_file()
 
-              good = ir(
-                  question='Use the figure. <img src="image/diagram.png">',
-                  assets=("image/diagram.png",),
-              )
-              path = export_jsonl([ExportRecord(ir=good, stage=RunStage.ACCEPTED)], output)
-              assert path.is_file()
-
-          image_bad_cases = (
-              ir(question="Use the diagram.", assets=("image/missing.png",)),
-              ir(question='<img src="image/missing.png">', assets=("image/missing.png",)),
+          # Missing placement, undeclared/mismatched refs, traversal and absolute paths.
+          for bad in (
+              ir(question="Use the diagram.", assets=("image/declared.png",)),
               ir(question='<img src="image/undeclared.png">', assets=()),
               ir(question='<img src="image/placed.png">', assets=("image/declared.png",)),
               ir(question='<img src="image/../escape.png">', assets=("image/../escape.png",)),
               ir(question='<img src="/tmp/escape.png">', assets=("/tmp/escape.png",)),
-          )
-          for bad in image_bad_cases:
+          ):
               with TemporaryDirectory() as td:
                   output = Path(td)
-                  # Land any declared non-traversal asset so placement/inventory, not file absence,
-                  # is what decides mismatch cases where applicable.
                   for rel in bad.question.assets:
                       if rel.startswith("image/") and ".." not in Path(rel).parts:
                           target = output / rel
@@ -142,10 +114,19 @@ jobs:
                   else:
                       raise AssertionError(f"invalid image inventory exported: {bad.question}")
 
+          # Matching declared/reference but file absent must reject.
+          with TemporaryDirectory() as td:
+              missing = ir(question='<img src="image/missing.png">', assets=("image/missing.png",))
+              try:
+                  export_jsonl([ExportRecord(ir=missing, stage=RunStage.ACCEPTED)], Path(td))
+              except ValueError:
+                  pass
+              else:
+                  raise AssertionError("missing declared image file exported")
+
           with TemporaryDirectory() as td:
               text_only = ir(question="Pure text question.", assets=())
-              path = export_jsonl([ExportRecord(ir=text_only, stage=RunStage.ACCEPTED)], Path(td))
-              assert path.is_file()
+              assert export_jsonl([ExportRecord(ir=text_only, stage=RunStage.ACCEPTED)], Path(td)).is_file()
 
           print("TASK13_REVIEWER_CONTRACT_GREEN")
           PY
