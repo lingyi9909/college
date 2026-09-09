@@ -1,0 +1,28 @@
+name: Task 13 Review Regressions RED
+
+on:
+  push:
+    branches:
+      - verification/task13-review-fixes-red
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Task 13 tests-only RED candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 74fad749b380a761824f4dd38af38fde0ec00149
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Task 13 targeted tests
+        run: pytest tests/unit/export tests/e2e/test_final_export.py -q
