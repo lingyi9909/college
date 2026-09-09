@@ -297,6 +297,8 @@ class NearDuplicateIndex:
             )
 
         decision = DuplicateDecision(label)
+        kept_ids: tuple[str, ...]
+        dropped_ids: tuple[str, ...]
         if decision is DuplicateDecision.SAME_PROBLEM:
             kept, dropped = _choose_kept(left, right)
             kept_ids = (kept.candidate.record_id,)
