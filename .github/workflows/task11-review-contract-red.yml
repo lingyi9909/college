@@ -1,0 +1,116 @@
+name: Task 11 Acceptance Contract RED
+
+on:
+  push:
+    branches:
+      - verification/task11-review-contract-red
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact Task 11 develop HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: 8462c99bd106d3aff069da8bf90924e2a6fe84ef
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Task 11 verifier boundary contracts
+        shell: bash
+        run: |
+          python - <<'PY'
+          from college_builder.domain.source import NormalizedQA
+          from college_builder.providers.base import ModelDecision
+          from college_builder.quality.dedup import DedupItem, NearDuplicateIndex
+
+          failures = []
+
+          def item(record_id: str, question: str) -> DedupItem:
+              return DedupItem(
+                  candidate=NormalizedQA(
+                      record_id=record_id,
+                      source_record_id=f"raw-{record_id}",
+                      question=question,
+                      answer="4",
+                      analysis="The source analysis derives 4.",
+                      subject_candidates=("mathematics",),
+                      images=(),
+                      metadata={},
+                      normalization_evidence={},
+                  ),
+                  provenance_score=0.8,
+                  quality_score=0.8,
+              )
+
+          left = item("left", "Evaluate the limit of sin(x)/x as x approaches 0.")
+          right = item("right", "Find lim sin(x)/x for x tending to zero.")
+
+          class Provider:
+              provider = "acceptance"
+              model = "malformed-v1"
+              def __init__(self, output):
+                  self.output = output
+              def classify(self, request):
+                  return self.output
+
+          def exercise(output, name: str):
+              verifier = Provider(output)
+              index = NearDuplicateIndex(
+                  retrieval_threshold=0.20,
+                  verifier=verifier,
+                  prompt="Classify pair relation only.",
+                  prompt_version="v1",
+                  num_perm=64,
+              )
+              try:
+                  evidence = index.decide_pair(left, right, semantic_similarity=0.99)
+              except Exception as exc:
+                  failures.append(f"{name}: malformed verifier output escaped as {type(exc).__name__}: {exc}")
+                  return
+              if evidence.dropped_record_ids:
+                  failures.append(
+                      f"{name}: malformed verifier output caused deletion: {evidence.dropped_record_ids}"
+                  )
+
+          # Typed Pydantic construction bypass: empty evidence refs violate ModelDecision contract.
+          exercise(
+              ModelDecision.model_construct(
+                  label="SAME_PROBLEM",
+                  score=0.99,
+                  evidence_references=(),
+                  reason_code="BYPASS",
+              ),
+              "empty-evidence-model-construct",
+          )
+
+          # Typed construction bypass: out-of-range score must not crash the dedup stage.
+          exercise(
+              ModelDecision.model_construct(
+                  label="SAME_PROBLEM",
+                  score=2.0,
+                  evidence_references=("left:question", "right:question"),
+                  reason_code="BYPASS",
+              ),
+              "out-of-range-score-model-construct",
+          )
+
+          # Provider contract violation must also fail safely rather than crash.
+          exercise(
+              {"label": "SAME_PROBLEM", "score": 0.99},
+              "non-model-provider-output",
+          )
+
+          if failures:
+              print("TASK11_ACCEPTANCE_RED")
+              for failure in failures:
+                  print("-", failure)
+              raise SystemExit(1)
+          print("TASK11_ACCEPTANCE_GREEN")
+          PY
