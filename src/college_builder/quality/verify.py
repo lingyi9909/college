@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import math
 import re
 from collections.abc import Callable
@@ -546,10 +547,46 @@ def _strip_terminal_punctuation(text: str) -> str:
     return stripped
 
 
+def _is_safe_expression_syntax(text: str, *, allow_symbols: bool) -> bool:
+    normalized = text.replace("^", "**")
+    try:
+        tree = ast.parse(normalized, mode="eval")
+    except (SyntaxError, ValueError):
+        return False
+
+    allowed_nodes = (
+        ast.Expression,
+        ast.BinOp,
+        ast.UnaryOp,
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+        ast.Pow,
+        ast.UAdd,
+        ast.USub,
+        ast.Constant,
+        ast.Name,
+        ast.Load,
+    )
+    for node in ast.walk(tree):
+        if not isinstance(node, allowed_nodes):
+            return False
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+                return False
+        if isinstance(node, ast.Name):
+            if not allow_symbols or _SIMPLE_SYMBOL_RE.fullmatch(node.id) is None:
+                return False
+    return True
+
+
 def _safe_sympify(text: str, *, allow_symbols: bool) -> object | None:
     stripped = text.strip()
     allowed = _SAFE_ALGEBRA_RE if allow_symbols else _SAFE_ARITHMETIC_RE
     if not stripped or allowed.fullmatch(stripped) is None:
+        return None
+    if not _is_safe_expression_syntax(stripped, allow_symbols=allow_symbols):
         return None
     try:
         parsed: object = sympify(stripped.replace("^", "**"), evaluate=True)
