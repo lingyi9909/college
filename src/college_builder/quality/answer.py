@@ -20,6 +20,19 @@ _REFERENTIAL_ANSWER_RE = re.compile(
     r"(?is)(?:\b(?:shown|given|stated)\s+above\b|\b(?:see|refer\s+to)\b|"
     r"(?:如上|上述|上面|见上))"
 )
+_URL_ONLY_RE = re.compile(r"(?is)^\s*(?:https?://\S+|\[[^\]]*\]\(https?://[^)]+\))\s*$")
+_PAGE_ONLY_RE = re.compile(
+    r"(?is)^\s*(?:see\s+)?(?:page\s*|p\.\s*)\d+(?:\s*[-–]\s*\d+)?\.?\s*$"
+)
+_CN_PAGE_ONLY_RE = re.compile(r"^\s*(?:见\s*)?第?\s*\d+\s*页\s*[。.]?\s*$")
+_REFERENTIAL_ONLY_RE = re.compile(
+    r"(?is)^\s*(?:"
+    r"(?:see|refer\s+to)\s+(?:the\s+)?(?:(?:answer|result|solution)\s+)?(?:above|below)|"
+    r"(?:the\s+)?(?:answer|result|solution)\s+(?:shown|given|stated)\s+(?:above|below)|"
+    r"(?:答案|结果|解答|解)?\s*(?:见|如)\s*(?:上|上文|上面|上述|下文|下方|如下)|"
+    r"(?:上述|上面|以上|下述|下面)\s*(?:答案|结果|解答|解)?"
+    r")\s*[。.]?\s*$"
+)
 _PLACEHOLDERS = frozenset({"略"})
 
 
@@ -64,7 +77,7 @@ def extract_source_answer(candidate: NormalizedQA) -> AnswerExtraction:
     answer_span = _trimmed_span(candidate.answer)
     if answer_span is not None:
         start, end, text = answer_span
-        if text not in _PLACEHOLDERS:
+        if text not in _PLACEHOLDERS and not _is_unextractable_direct_answer(text):
             return _extraction(
                 final_answer=text,
                 source_field="answer",
@@ -212,6 +225,15 @@ def _conclusion_span(text: str) -> tuple[int, int, str] | None:
     if answer in _PLACEHOLDERS or _REFERENTIAL_ANSWER_RE.search(answer):
         return None
     return start, end, answer
+
+
+def _is_unextractable_direct_answer(text: str) -> bool:
+    return bool(
+        _URL_ONLY_RE.fullmatch(text)
+        or _PAGE_ONLY_RE.fullmatch(text)
+        or _CN_PAGE_ONLY_RE.fullmatch(text)
+        or _REFERENTIAL_ONLY_RE.fullmatch(text)
+    )
 
 
 def _has_meaningful_source(text: str) -> bool:
