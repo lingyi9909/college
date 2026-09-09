@@ -1,0 +1,58 @@
+[
+  {
+    "name": "missing_answer_and_solution",
+    "gate": "answer",
+    "answer": "",
+    "analysis": "",
+    "expected_reason": "ANSWER_MISSING"
+  },
+  {
+    "name": "implicit_answer_not_extractable",
+    "gate": "answer",
+    "answer": "",
+    "analysis": "Solving gives the result shown above",
+    "expected_reason": "ANSWER_NOT_EXTRACTABLE"
+  },
+  {
+    "name": "empty_analysis",
+    "gate": "analysis",
+    "answer": "x = 4",
+    "analysis": "",
+    "expected_reason": "ANALYSIS_MISSING"
+  },
+  {
+    "name": "omitted_analysis",
+    "gate": "analysis",
+    "answer": "x = 4",
+    "analysis": "略",
+    "expected_reason": "ANALYSIS_MISSING"
+  },
+  {
+    "name": "answer_only_analysis",
+    "gate": "analysis",
+    "answer": "x = 4",
+    "analysis": "x = 4",
+    "expected_reason": "ANALYSIS_TOO_SHALLOW"
+  },
+  {
+    "name": "link_only_analysis",
+    "gate": "analysis",
+    "answer": "x = 4",
+    "analysis": "https://example.com/solution",
+    "expected_reason": "ANALYSIS_TOO_SHALLOW"
+  },
+  {
+    "name": "page_reference_only_analysis",
+    "gate": "analysis",
+    "answer": "x = 4",
+    "analysis": "See page 42.",
+    "expected_reason": "ANALYSIS_TOO_SHALLOW"
+  },
+  {
+    "name": "same_as_above_analysis",
+    "gate": "analysis",
+    "answer": "x = 4",
+    "analysis": "同上",
+    "expected_reason": "ANALYSIS_TOO_SHALLOW"
+  }
+]
