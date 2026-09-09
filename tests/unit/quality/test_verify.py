@@ -395,6 +395,18 @@ def test_deterministic_arithmetic_confirms_without_modifying_source_answer() -> 
     assert candidate.answer == "5"
 
 
+def test_deterministic_function_calls_are_not_evaluated() -> None:
+    candidate = _candidate(
+        question="Compute abs(-3).",
+        answer="3",
+        analysis="The source applies an absolute-value function.",
+    )
+
+    result = DeterministicMathVerifier().verify(candidate)
+
+    assert result.status is DeterministicVerificationStatus.NOT_VERIFIED
+
+
 def test_deterministic_arithmetic_contradiction_rejects_before_model() -> None:
     candidate = _candidate(
         question="Compute 2 + 3.",
