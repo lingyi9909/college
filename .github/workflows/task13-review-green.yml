@@ -1,0 +1,34 @@
+name: Task 13 Review GREEN
+
+on:
+  push:
+    branches:
+      - verification/task13-review-green
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Task 13 review candidate
+        uses: actions/checkout@v4
+        with:
+          ref: cb41169e2ebf4c704479e64d17ca211d9407704d
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Task 13 targeted tests
+        run: pytest tests/unit/export tests/e2e/test_final_export.py -q
+      - name: Full test suite
+        run: pytest tests -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
