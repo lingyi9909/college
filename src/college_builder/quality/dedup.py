@@ -120,8 +120,11 @@ class ExactDeduper:
         kept_ids = tuple(
             item.candidate.record_id for item in items if item.candidate.record_id in final_kept
         )
+        dropped_id_set = set(dropped_ids)
         ordered_dropped = tuple(
-            item.candidate.record_id for item in items if item.candidate.record_id in set(dropped_ids)
+            item.candidate.record_id
+            for item in items
+            if item.candidate.record_id in dropped_id_set
         )
         return DedupBatchResult(
             kept_record_ids=kept_ids,
