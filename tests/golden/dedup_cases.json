@@ -1,0 +1,62 @@
+[
+  {
+    "id": "exact_unicode_blanklines",
+    "mode": "exact",
+    "left_question": "Compute café\r\n\r\n\r\nthen solve x = 4",
+    "right_question": "Compute café\n\nthen solve x = 4",
+    "left_provenance_score": 0.70,
+    "left_quality_score": 0.95,
+    "right_provenance_score": 0.90,
+    "right_quality_score": 0.90,
+    "expected_decision": "SAME_PROBLEM",
+    "expect_drop": true
+  },
+  {
+    "id": "integral_variant",
+    "mode": "semantic",
+    "left_question": "Evaluate the indefinite integral ∫x dx.",
+    "right_question": "Evaluate the indefinite integral ∫2x dx.",
+    "retrieval_threshold": 0.20,
+    "semantic_similarity": 0.98,
+    "verifier_label": "VARIANT",
+    "expected_decision": "VARIANT",
+    "expect_drop": false
+  },
+  {
+    "id": "mirrored_same_problem",
+    "mode": "semantic",
+    "left_question": "Solve the linear equation 2x + 3 = 11.",
+    "right_question": "Find x in the linear equation 2x + 3 = 11.",
+    "left_provenance_score": 0.70,
+    "left_quality_score": 0.99,
+    "right_provenance_score": 0.95,
+    "right_quality_score": 0.90,
+    "retrieval_threshold": 0.20,
+    "semantic_similarity": 0.97,
+    "verifier_label": "SAME_PROBLEM",
+    "expected_decision": "SAME_PROBLEM",
+    "expect_drop": true
+  },
+  {
+    "id": "similar_but_different_sign",
+    "mode": "semantic",
+    "left_question": "Compute the derivative of x^2 + 3x.",
+    "right_question": "Compute the derivative of x^2 - 3x.",
+    "retrieval_threshold": 0.20,
+    "semantic_similarity": 0.99,
+    "verifier_label": "DIFFERENT",
+    "expected_decision": "DIFFERENT",
+    "expect_drop": false
+  },
+  {
+    "id": "uncertain_semantic_match",
+    "mode": "semantic",
+    "left_question": "Evaluate the limit of sin(x)/x as x approaches 0.",
+    "right_question": "Find lim sin(x)/x for x tending to zero.",
+    "retrieval_threshold": 0.20,
+    "semantic_similarity": 0.99,
+    "verifier_label": "UNCERTAIN",
+    "expected_decision": "DIFFERENT",
+    "expect_drop": false
+  }
+]
