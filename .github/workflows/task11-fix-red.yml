@@ -1,0 +1,26 @@
+name: Task 11 Fix RED
+
+on:
+  push:
+    branches:
+      - verification/task11-fix-red
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tests-only SHA
+        uses: actions/checkout@v4
+        with:
+          ref: 0453c0494660858659845a908c4ec9025ba3f43f
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Run Task 11 targeted tests
+        run: pytest tests/unit/quality/test_dedup.py tests/golden -q
