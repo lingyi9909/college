@@ -107,6 +107,45 @@ def test_obviously_incomplete_analysis_rejects_before_model_call(
     assert len(verifier.requests) == 0
 
 
+@pytest.mark.parametrize(
+    "analysis",
+    [
+        "Therefore x = 4",
+        "Answer: x = 4",
+        "Final answer: x = 4",
+    ],
+)
+def test_answer_only_analysis_with_empty_answer_rejects_before_model_call(
+    analysis: str,
+) -> None:
+    gate, primary, verifier = _gate(_decision("DERIVATION", 0.99))
+
+    evidence = _run(gate, _candidate(answer="", analysis=analysis))
+
+    assert evidence.verdict is GateVerdict.REJECT
+    assert evidence.reason_code == "ANALYSIS_TOO_SHALLOW"
+    assert len(primary.requests) == 0
+    assert len(verifier.requests) == 0
+
+
+def test_empty_answer_does_not_reject_real_reasoning_with_final_conclusion() -> None:
+    analysis = "Subtract 3 from both sides, then divide by 2. Therefore x = 4."
+    gate, primary, verifier = _gate(
+        _decision(
+            "DERIVATION",
+            0.99,
+            evidence_references=(f"analysis:0-{len(analysis)}",),
+        )
+    )
+
+    evidence = _run(gate, _candidate(answer="", analysis=analysis))
+
+    assert evidence.verdict is GateVerdict.PASS
+    assert evidence.reason_code == "ANALYSIS_CONFIRMED"
+    assert len(primary.requests) == 1
+    assert len(verifier.requests) == 0
+
+
 @pytest.mark.parametrize("analysis_type", list(AnalysisType))
 def test_high_band_valid_analysis_type_passes_without_verifier(
     analysis_type: AnalysisType,
@@ -231,6 +270,99 @@ def test_analysis_positive_decision_requires_analysis_content_evidence() -> None
     assert evidence.verdict is GateVerdict.REJECT
     assert evidence.reason_code == "ANALYSIS_UNCERTAIN"
     assert len(verifier.requests) == 0
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "analysis:999-1000",
+        "analysis:20-10",
+        "analysis:-1-5",
+        "analysis:5-5",
+        "analysis:not-a-span",
+        "content:analysis",
+    ],
+)
+def test_high_band_positive_evidence_requires_real_source_span(reference: str) -> None:
+    analysis = "Subtract 3 from both sides, then divide by 2 to obtain x = 4."
+    gate, primary, verifier = _gate(
+        _decision(
+            "STEP_BY_STEP",
+            0.99,
+            evidence_references=(reference,),
+        )
+    )
+
+    evidence = _run(gate, _candidate(analysis=analysis))
+
+    assert evidence.verdict is GateVerdict.REJECT
+    assert evidence.reason_code == "ANALYSIS_UNCERTAIN"
+    assert len(primary.requests) == 1
+    assert len(verifier.requests) == 0
+
+
+def test_high_band_valid_analysis_span_passes() -> None:
+    analysis = "Subtract 3 from both sides, then divide by 2 to obtain x = 4."
+    gate, primary, verifier = _gate(
+        _decision(
+            "STEP_BY_STEP",
+            0.99,
+            evidence_references=(f"analysis:0-{len(analysis)}",),
+        )
+    )
+
+    evidence = _run(gate, _candidate(analysis=analysis))
+
+    assert evidence.verdict is GateVerdict.PASS
+    assert evidence.reason_code == "ANALYSIS_CONFIRMED"
+    assert len(primary.requests) == 1
+    assert len(verifier.requests) == 0
+
+
+def test_middle_band_primary_evidence_must_resolve_to_source_span() -> None:
+    analysis = "First subtract 3. Next divide by 2. This gives x = 4."
+    gate, primary, verifier = _gate(
+        _decision(
+            "STEP_BY_STEP",
+            0.95,
+            evidence_references=("analysis:999-1000",),
+        ),
+        _decision(
+            "STEP_BY_STEP",
+            0.99,
+            evidence_references=(f"analysis:0-{len(analysis)}",),
+        ),
+    )
+
+    evidence = _run(gate, _candidate(analysis=analysis))
+
+    assert evidence.verdict is GateVerdict.REJECT
+    assert evidence.reason_code == "ANALYSIS_UNCERTAIN"
+    assert len(primary.requests) == 1
+    assert len(verifier.requests) == 1
+
+
+def test_middle_band_verifier_evidence_must_resolve_to_source_span() -> None:
+    analysis = "First subtract 3. Next divide by 2. This gives x = 4."
+    gate, primary, verifier = _gate(
+        _decision(
+            "STEP_BY_STEP",
+            0.95,
+            evidence_references=(f"analysis:0-{len(analysis)}",),
+        ),
+        _decision(
+            "STEP_BY_STEP",
+            0.99,
+            evidence_references=("analysis:999-1000",),
+        ),
+    )
+
+    evidence = _run(gate, _candidate(analysis=analysis))
+
+    assert evidence.verdict is GateVerdict.REJECT
+    assert evidence.reason_code == "ANALYSIS_UNCERTAIN"
+    assert len(primary.requests) == 1
+    assert len(verifier.requests) == 1
 
 
 def test_analysis_request_contains_source_content_only() -> None:

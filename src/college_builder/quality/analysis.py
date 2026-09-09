@@ -20,7 +20,7 @@ from college_builder.quality.engine import GateContext, GateResultEvidence
 _VALID_ANALYSIS_LABELS = tuple(item.value for item in AnalysisType)
 _NEGATIVE_LABELS = ("TOO_SHALLOW", "UNRELATED", "UNCERTAIN")
 ANALYSIS_LABELS = _VALID_ANALYSIS_LABELS + _NEGATIVE_LABELS
-_ANALYSIS_EVIDENCE_PREFIXES = ("analysis:", "content:analysis")
+_ANALYSIS_SPAN_RE = re.compile(r"(?i)^analysis:(?P<start>\d+)-(?P<end>\d+)$")
 _URL_ONLY_RE = re.compile(r"(?is)^\s*(?:https?://\S+|\[[^\]]*\]\(https?://[^)]+\))\s*$")
 _PAGE_ONLY_RE = re.compile(
     r"(?is)^\s*(?:see\s+)?(?:page\s*|p\.\s*)?\d+(?:\s*[-–]\s*\d+)?\.?\s*$"
@@ -101,7 +101,12 @@ class AnalysisGate:
             )
 
         if primary.score >= self.pass_threshold:
-            return self._finalize_high_band(primary, context, primary_evidence)
+            return self._finalize_high_band(
+                primary,
+                candidate.analysis,
+                context,
+                primary_evidence,
+            )
 
         if primary.score < self.verify_threshold:
             return self._result(
@@ -172,7 +177,10 @@ class AnalysisGate:
                 reason_code=_semantic_reject_reason(primary.label),
                 evidence_payload=evidence_payload,
             )
-        if not _has_analysis_evidence(primary) or not _has_analysis_evidence(verifier):
+        if not _has_analysis_evidence(
+            primary,
+            candidate.analysis,
+        ) or not _has_analysis_evidence(verifier, candidate.analysis):
             return self._result(
                 context,
                 verdict=GateVerdict.REJECT,
@@ -193,6 +201,7 @@ class AnalysisGate:
     def _finalize_high_band(
         self,
         primary: ModelDecision,
+        analysis: str,
         context: GateContext,
         evidence_payload: dict[str, JsonValue],
     ) -> GateResultEvidence:
@@ -204,7 +213,7 @@ class AnalysisGate:
                 reason_code=_semantic_reject_reason(primary.label),
                 evidence_payload=evidence_payload,
             )
-        if not _has_analysis_evidence(primary):
+        if not _has_analysis_evidence(primary, analysis):
             return self._result(
                 context,
                 verdict=GateVerdict.REJECT,
@@ -287,12 +296,11 @@ def _deterministic_reject_reason(candidate: NormalizedQA) -> str | None:
     if source_answer and _canonical_answer(stripped) == _canonical_answer(source_answer):
         return "ANALYSIS_TOO_SHALLOW"
     wrapped_answer = _answer_only_payload(stripped)
-    if (
-        source_answer
-        and wrapped_answer is not None
-        and _canonical_answer(wrapped_answer) == _canonical_answer(source_answer)
-    ):
-        return "ANALYSIS_TOO_SHALLOW"
+    if wrapped_answer is not None:
+        if not source_answer:
+            return "ANALYSIS_TOO_SHALLOW"
+        if _canonical_answer(wrapped_answer) == _canonical_answer(source_answer):
+            return "ANALYSIS_TOO_SHALLOW"
 
     lowered = stripped.lower()
     if lowered in _SAME_AS_ABOVE:
@@ -349,8 +357,13 @@ def _decision_evidence(
     }
 
 
-def _has_analysis_evidence(decision: ModelDecision) -> bool:
-    return any(
-        reference.strip().lower().startswith(_ANALYSIS_EVIDENCE_PREFIXES)
-        for reference in decision.evidence_references
-    )
+def _has_analysis_evidence(decision: ModelDecision, analysis: str) -> bool:
+    for reference in decision.evidence_references:
+        match = _ANALYSIS_SPAN_RE.fullmatch(reference.strip())
+        if match is None:
+            continue
+        start = int(match.group("start"))
+        end = int(match.group("end"))
+        if 0 <= start < end <= len(analysis) and analysis[start:end].strip():
+            return True
+    return False
