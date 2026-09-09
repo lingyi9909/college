@@ -47,7 +47,7 @@ def _ir(
     assets: tuple[str, ...] = (),
     raw_answer: str = "x = 4",
     final_answer: str | None = "x = 4",
-    source_span: str | None = "answer:0-5",
+    source_span: str | None = "answer:0:5",
 ) -> UniversityQuestionIR:
     analysis = "Subtract 3 from both sides and divide by 2. Therefore x = 4"
     return UniversityQuestionIR(
@@ -142,8 +142,16 @@ def test_static_info_contains_required_source_traceability_and_no_provider_secre
     assert "internal-model-secret" not in serialized
 
 
-def test_analysis_origin_final_answer_hashes_the_actual_authority_source() -> None:
-    ir = _ir(raw_answer="See above", source_span="analysis:53-58")
+def test_direct_answer_valid_canonical_span_passes() -> None:
+    record = to_final_record(
+        _ir(raw_answer="x = 4", final_answer="x = 4", source_span="answer:0:5")
+    )
+
+    assert record.text_answer == "x = 4"
+
+
+def test_analysis_origin_valid_canonical_span_passes_and_hashes_authority_source() -> None:
+    ir = _ir(raw_answer="See above", source_span="analysis:54:59")
     record = to_final_record(ir)
     static_info = json.loads(record.static_info)
 
@@ -151,6 +159,53 @@ def test_analysis_origin_final_answer_hashes_the_actual_authority_source() -> No
     assert static_info["source_answer_hash"] == hashlib.sha256(
         ir.analysis.raw.encode("utf-8")
     ).hexdigest()
+
+
+def test_final_answer_must_equal_claimed_source_span() -> None:
+    with pytest.raises(ValueError, match="source span"):
+        to_final_record(
+            _ir(raw_answer="x = 4", final_answer="x = 5", source_span="answer:0:5")
+        )
+
+
+@pytest.mark.parametrize(
+    "source_span",
+    [
+        "answer:999:1000",
+        "answer:0:0",
+        "answer:5:0",
+    ],
+)
+def test_out_of_range_zero_length_or_reversed_source_span_rejects(
+    source_span: str,
+) -> None:
+    with pytest.raises(ValueError, match="source span"):
+        to_final_record(_ir(source_span=source_span))
+
+
+@pytest.mark.parametrize(
+    "source_span",
+    [
+        "answer:0-5",
+        "answer:zero:5",
+        "answer:0",
+        "answer:0:5:extra",
+        ":0:5",
+    ],
+)
+def test_malformed_source_span_rejects(source_span: str) -> None:
+    with pytest.raises(ValueError, match="source span"):
+        to_final_record(_ir(source_span=source_span))
+
+
+def test_unsupported_source_span_field_rejects() -> None:
+    with pytest.raises(ValueError, match="source span"):
+        to_final_record(_ir(source_span="question:0:5"))
+
+
+def test_analysis_span_must_cover_the_authorized_final_answer() -> None:
+    with pytest.raises(ValueError, match="source span"):
+        to_final_record(_ir(raw_answer="See above", source_span="analysis:0:3"))
 
 
 @pytest.mark.parametrize(
