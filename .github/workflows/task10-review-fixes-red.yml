@@ -1,0 +1,28 @@
+name: Task 10 Review Fixes RED
+
+on:
+  push:
+    branches:
+      - verification/task10-review-fixes-red
+
+permissions:
+  contents: read
+
+jobs:
+  verify-red:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Task 10 review RED exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ff82017cda78f14bccdb98d67e43c8fb480a8ab5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Run Task 10 review regressions
+        run: pytest tests/unit/quality/test_answer.py tests/unit/quality/test_analysis.py -q
