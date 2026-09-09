@@ -1,0 +1,112 @@
+name: Task 12 Acceptance Contract RED
+
+on:
+  push:
+    branches:
+      - verification/task12-review-contract-red
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact Task 12 develop HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: 74176b2f8daeed99ce1a0362e9264a2f5e8589d8
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Verify Task 10 extracted-answer continuity into Task 12
+        shell: bash
+        run: |
+          python - <<'PY'
+          from college_builder.domain.evidence import GateVerdict
+          from college_builder.domain.source import NormalizedQA
+          from college_builder.providers.base import ModelClassificationRequest, ModelDecision
+          from college_builder.quality.answer import extract_source_answer
+          from college_builder.quality.engine import GateContext, GateEngine
+          from college_builder.quality.verify import AlignmentGate, CorrectnessVerifier
+
+          def candidate(answer: str) -> NormalizedQA:
+              return NormalizedQA(
+                  record_id="norm-1",
+                  source_record_id="raw-1",
+                  question="Solve 2*x + 3 = 11.",
+                  answer=answer,
+                  analysis="Subtract 3 from both sides and divide by 2. Therefore x = 4",
+                  subject_candidates=("mathematics",),
+                  images=(),
+                  metadata={},
+                  normalization_evidence={},
+              )
+
+          class Provider:
+              provider = "acceptance"
+              model = "task12-v1"
+              def __init__(self):
+                  self.requests = []
+              def classify(self, request: ModelClassificationRequest) -> ModelDecision:
+                  self.requests.append(request)
+                  q = str(request.inputs["question"])
+                  a = str(request.inputs["answer"])
+                  analysis = str(request.inputs["analysis"])
+                  refs = [f"question:0-{len(q)}", f"analysis:0-{len(analysis)}"]
+                  if a:
+                      refs.insert(1, f"answer:0-{len(a)}")
+                  return ModelDecision(
+                      label="PASS",
+                      score=0.999,
+                      evidence_references=tuple(refs),
+                      reason_code="SOURCE_GROUNDED",
+                  )
+
+          failures = []
+          for source_answer in ("", "See above"):
+              c = candidate(source_answer)
+              extraction = extract_source_answer(c)
+              assert extraction.final_answer == "x = 4", extraction
+              assert extraction.source_field == "analysis", extraction
+              assert extraction.answer_extract_score >= 0.995, extraction
+
+              ap = Provider()
+              alignment = AlignmentGate(provider=ap, prompt="alignment", prompt_version="v1")
+              arun = GateEngine(gates=(alignment,), context=GateContext(config_version="pilot-v1")).run(c)
+              if ap.requests[0].inputs["answer"] != extraction.final_answer:
+                  failures.append(
+                      f"alignment source_answer={source_answer!r}: verifier received {ap.requests[0].inputs['answer']!r} instead of extracted {extraction.final_answer!r}"
+                  )
+              if arun.verdict is not GateVerdict.PASS:
+                  failures.append(
+                      f"alignment source_answer={source_answer!r}: Task10-valid extracted answer cannot pass Task12 alignment: {arun.evidence[0].reason_code}"
+                  )
+
+              cp = Provider()
+              correctness = CorrectnessVerifier(
+                  provider=cp,
+                  prompt="correctness",
+                  prompt_version="v1",
+                  calibration_id="identity-v1",
+              )
+              crun = GateEngine(gates=(correctness,), context=GateContext(config_version="pilot-v1")).run(c)
+              if cp.requests[0].inputs["answer"] != extraction.final_answer:
+                  failures.append(
+                      f"correctness source_answer={source_answer!r}: verifier received {cp.requests[0].inputs['answer']!r} instead of extracted {extraction.final_answer!r}"
+                  )
+              if crun.verdict is not GateVerdict.PASS:
+                  failures.append(
+                      f"correctness source_answer={source_answer!r}: Task10-valid extracted answer cannot pass Task12 correctness: {crun.evidence[0].reason_code}"
+                  )
+
+          if failures:
+              print("TASK12_ACCEPTANCE_RED")
+              for failure in failures:
+                  print("-", failure)
+              raise SystemExit(1)
+          print("TASK12_ACCEPTANCE_GREEN")
+          PY
