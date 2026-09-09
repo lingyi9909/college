@@ -86,6 +86,8 @@ def _run(gate: AnalysisGate, candidate: NormalizedQA) -> GateResultEvidence:
         ("", "ANALYSIS_MISSING"),
         ("略", "ANALYSIS_MISSING"),
         ("x = 4", "ANALYSIS_TOO_SHALLOW"),
+        ("Answer: x = 4", "ANALYSIS_TOO_SHALLOW"),
+        ("Therefore x = 4", "ANALYSIS_TOO_SHALLOW"),
         ("https://example.com/solution", "ANALYSIS_TOO_SHALLOW"),
         ("See page 42.", "ANALYSIS_TOO_SHALLOW"),
         ("同上", "ANALYSIS_TOO_SHALLOW"),
@@ -221,8 +223,7 @@ def test_analysis_positive_decision_requires_analysis_content_evidence() -> None
         )
     )
 
-    evidence = _run(
-        gate,
+    evidence = _run(\ate,
         _candidate(analysis="Subtract 3 and divide by 2, therefore x = 4."),
     )
 
