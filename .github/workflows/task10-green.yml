@@ -1,0 +1,27 @@
+name: Task 10 GREEN
+on:
+  push:
+    branches:
+      - verification/task10-green
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Task 10 GREEN exact head
+        uses: actions/checkout@v4
+        with:
+          ref: b228c4d60c661f6b0fa08cba1accfc56c3aa2eac
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Task 10 tests
+        run: pytest tests/unit/quality/test_answer.py tests/unit/quality/test_analysis.py tests/golden -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
