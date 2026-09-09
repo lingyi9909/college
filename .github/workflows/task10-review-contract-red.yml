@@ -1,0 +1,159 @@
+name: Task 10 Acceptance Contract RED
+
+on:
+  push:
+    branches:
+      - verification/task10-review-contract-red
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact Task 10 develop HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: fa7e236857665fa35c043f1ebfae53ad08939e5f
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Task 10 acceptance contracts
+        shell: bash
+        run: |
+          python - <<'PY'
+          from college_builder.domain.evidence import GateVerdict
+          from college_builder.domain.source import NormalizedQA
+          from college_builder.providers.base import ModelDecision
+          from college_builder.providers.fake import FakeStructuredModelProvider
+          from college_builder.quality.answer import AnswerGate
+          from college_builder.quality.analysis import AnalysisGate
+          from college_builder.quality.engine import GateContext, GateEngine
+
+          failures = []
+
+          def candidate(*, answer: str, analysis: str) -> NormalizedQA:
+              return NormalizedQA(
+                  record_id="norm-acceptance",
+                  source_record_id="raw-acceptance",
+                  question="Solve 2x + 3 = 11.",
+                  answer=answer,
+                  analysis=analysis,
+                  subject_candidates=("mathematics",),
+                  images=(),
+                  metadata={},
+                  normalization_evidence={},
+              )
+
+          def run(gate, item):
+              return GateEngine(
+                  gates=(gate,),
+                  context=GateContext(config_version="pilot-v1"),
+              ).run(item).evidence[0]
+
+          # A source answer must contain an extractable final answer, not merely a literal reference.
+          for answer in (
+              "See above",
+              "See page 42.",
+              "https://example.com/answer",
+              "The result shown above",
+          ):
+              evidence = run(
+                  AnswerGate(),
+                  candidate(
+                      answer=answer,
+                      analysis="Subtract 3 from both sides and divide by 2.",
+                  ),
+              )
+              if evidence.verdict is GateVerdict.PASS:
+                  failures.append(
+                      f"referential/non-answer source text must not PASS AnswerGate: {answer!r}"
+                  )
+
+          # If Gate 3 extracts a conclusion from analysis, that same answer-only text cannot also
+          # qualify as a complete analysis.
+          answer_only = candidate(answer="", analysis="Therefore x = 4")
+          answer_evidence = run(AnswerGate(), answer_only)
+          if answer_evidence.verdict is not GateVerdict.PASS:
+              failures.append(
+                  f"control case expected deterministic Gate 3 extraction, got {answer_evidence.verdict}"
+              )
+
+          primary = FakeStructuredModelProvider(
+              provider="fake",
+              model="analysis-primary-v1",
+              decisions=(
+                  ModelDecision(
+                      label="DERIVATION",
+                      score=0.99,
+                      evidence_references=("analysis:0-15",),
+                      reason_code="ACCEPTANCE",
+                  ),
+              ),
+          )
+          verifier = FakeStructuredModelProvider(
+              provider="fake",
+              model="analysis-verifier-v2",
+              decisions=(),
+          )
+          analysis_evidence = run(
+              AnalysisGate(
+                  primary=primary,
+                  verifier=verifier,
+                  prompt="classification only",
+                  prompt_version="v1",
+              ),
+              answer_only,
+          )
+          if analysis_evidence.verdict is GateVerdict.PASS:
+              failures.append(
+                  "answer-only analysis with empty candidate.answer can currently PASS Gate 4"
+              )
+
+          # Evidence references must resolve to the supplied analysis, not just carry an analysis: prefix.
+          reasoning = candidate(
+              answer="x = 4",
+              analysis="Subtract 3 from both sides, then divide by 2 to obtain x = 4.",
+          )
+          primary = FakeStructuredModelProvider(
+              provider="fake",
+              model="analysis-primary-v1",
+              decisions=(
+                  ModelDecision(
+                      label="STEP_BY_STEP",
+                      score=0.99,
+                      evidence_references=("analysis:999-1000",),
+                      reason_code="ACCEPTANCE",
+                  ),
+              ),
+          )
+          verifier = FakeStructuredModelProvider(
+              provider="fake",
+              model="analysis-verifier-v2",
+              decisions=(),
+          )
+          evidence = run(
+              AnalysisGate(
+                  primary=primary,
+                  verifier=verifier,
+                  prompt="classification only",
+                  prompt_version="v1",
+              ),
+              reasoning,
+          )
+          if evidence.verdict is GateVerdict.PASS:
+              failures.append(
+                  "out-of-range analysis evidence reference can currently force PASS"
+              )
+
+          if failures:
+              print("TASK10_ACCEPTANCE_RED")
+              for failure in failures:
+                  print("-", failure)
+              raise SystemExit(1)
+          print("TASK10_ACCEPTANCE_GREEN")
+          PY
