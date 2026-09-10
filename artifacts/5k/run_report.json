@@ -1,30 +1,39 @@
 {
-  "status": "BLOCKED_EXTERNAL_PROVIDER",
-  "pilot_size": 5000,
-  "sampling": {
-    "seed": 20260910,
-    "quotas": {
-      "math": 2000,
-      "physics": 1000,
-      "statistics": 1000,
-      "mathoverflow": 1000
-    }
-  },
-  "source_dataset": "math-ai/StackMathQA",
-  "source_revision": "git:13239ec8c8078bc8dfb43e1383069eb9be000ff7",
-  "config_version": "pilot-5k-frozen-v1",
+  "blocker": "The repository CI environment does not provide a usable OpenAI-compatible endpoint and matching provider credentials, so the real model-backed 5K run has not been executed and no acceptance, reject-distribution, cost, latency, or quality metrics are fabricated.",
   "config_sha256": "0c13691fce9a8300cf159db55fc2ae3ba0135d8abb123605686697aab54341b4",
+  "config_version": "pilot-5k-frozen-v1",
+  "engineering_preflight": {
+    "bounded_memory_sampling": "PASS",
+    "exact_5k_sampling_contract": "PASS",
+    "gold_complete_pipeline_regression": "PASS",
+    "immutable_source_revision_required": "PASS",
+    "raw_content_hash_bound_sample_identity": "PASS",
+    "source_file_hash_manifest": "PASS"
+  },
+  "pilot_size": 5000,
   "prompt_versions": {
-    "university_classify": "v1",
-    "problem_classify": "v1",
     "analysis_classify": "v1",
+    "correctness_verify": "v1",
+    "problem_classify": "v1",
     "qa_alignment": "v1",
-    "correctness_verify": "v1"
+    "university_classify": "v1"
   },
   "providers": {
     "classifier": "openai_compatible/pilot-classifier-v1",
     "verifier": "openai_compatible/pilot-verifier-v1"
   },
-  "blocker": "OPENAI_COMPATIBLE_BASE_URL and provider credentials are not available to the repository CI environment; no model-backed 5K acceptance metrics are fabricated.",
-  "raw_rows_committed": false
+  "raw_rows_committed": false,
+  "sampling": {
+    "quotas": {
+      "math": 2000,
+      "mathoverflow": 1000,
+      "physics": 1000,
+      "statistics": 1000
+    },
+    "seed": 20260910
+  },
+  "sampling_command": "college-builder pilot sample --source-root <staged-stackmathqa> --source-revision git:13239ec8c8078bc8dfb43e1383069eb9be000ff7 --seed 20260910 --output artifacts/5k/sample.jsonl --manifest artifacts/5k/sample_manifest.json",
+  "source_dataset": "math-ai/StackMathQA",
+  "source_revision": "git:13239ec8c8078bc8dfb43e1383069eb9be000ff7",
+  "status": "BLOCKED_EXTERNAL_PROVIDER"
 }
