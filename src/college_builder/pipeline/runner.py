@@ -30,6 +30,7 @@ from college_builder.domain.question import (
 )
 from college_builder.domain.source import JsonValue, NormalizedQA, RawSourceRecord
 from college_builder.export.jsonl import ExportRecord, export_jsonl
+from college_builder.export.profile import to_final_record
 from college_builder.normalize.normalizer import NORMALIZATION_VERSION, normalize
 from college_builder.providers.base import (
     ModelClassificationRequest,
@@ -44,10 +45,10 @@ from college_builder.quality.engine import GateContext, GateEngine, GateResultEv
 from college_builder.quality.integrity import IntegrityGate
 from college_builder.quality.verify import AlignmentGate, CorrectnessVerifier
 from college_builder.reporting.pilot_report import (
-    PilotReport,
     ProviderUsage,
     RecordAudit,
     build_pilot_report,
+    load_pilot_report,
     write_pilot_report,
 )
 from college_builder.source.base import SourceAdapter, SourceDescriptor
@@ -55,6 +56,7 @@ from college_builder.storage.cache import CallCache
 from college_builder.storage.state import RunStage, RunStateStore
 
 _NORMALIZER = Callable[[RawSourceRecord], NormalizedQA]
+_PROMPT_LOADER = Callable[[str, str], str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,18 +156,20 @@ class _CachedStructuredProvider:
             return ModelDecision.model_validate(cached)
 
         self._usage.cache_misses += 1
+        self._usage.provider_call_counts[request.task] += 1
         started = time.perf_counter()
         try:
-            decision = self._provider.classify(request)
+            raw: object = self._provider.classify(request)
+            if not isinstance(raw, ModelDecision):
+                raise TypeError("provider returned non-ModelDecision output")
             validated = ModelDecision.model_validate(
-                decision.model_dump(mode="python", warnings=False)
+                raw.model_dump(mode="python", warnings=False)
             )
         except Exception:
             self._usage.provider_errors += 1
             raise
         finally:
             self._usage.latency_seconds += time.perf_counter() - started
-        self._usage.provider_call_counts[request.task] += 1
         self._cache.put(cache_key, validated.model_dump(mode="json"))
         return validated
 
@@ -181,9 +185,11 @@ class GatePipelineProcessor:
         primary_provider: StructuredModelProvider,
         verifier_provider: StructuredModelProvider,
         project_root: Path,
+        prompt_loader: _PROMPT_LOADER | None = None,
     ) -> None:
         self.config = config
         self._project_root = Path(project_root)
+        self._prompt_loader = prompt_loader
         cache = CallCache(cache_path)
         self._usage = _UsageAccumulator(provider_call_counts=Counter())
         prompt_versions = {
@@ -365,8 +371,14 @@ class GatePipelineProcessor:
         return _VerificationOutcome(evidence, None, True, True)
 
     def _prompt(self, task: str, version: str) -> str:
-        path = self._project_root / "prompts" / task / f"{version}.txt"
-        return path.read_text(encoding="utf-8")
+        if self._prompt_loader is not None:
+            value = self._prompt_loader(task, version)
+        else:
+            path = self._project_root / "prompts" / task / f"{version}.txt"
+            value = path.read_text(encoding="utf-8")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"prompt {task}/{version} must be non-empty")
+        return value
 
 
 class PipelineRunner:
@@ -429,12 +441,28 @@ class PipelineRunner:
         source_snapshot_hash = manifest.get("source_snapshot_hash")
         if not isinstance(source_snapshot_hash, str) or not source_snapshot_hash:
             raise ValueError("run manifest source snapshot is invalid")
+
+        destination = Path(output_dir)
+        completed_report = run_dir / "run_report.json"
+        completed_output = destination / "questions.jsonl"
+        if completed_report.is_file() and completed_output.is_file():
+            report = load_pilot_report(completed_report)
+            write_pilot_report(report, destination / "pilot_report.json")
+            return PipelineRunResult(
+                run_id=run_id,
+                run_dir=run_dir,
+                output_path=completed_output,
+                report_path=completed_report,
+                accepted_count=report.accepted_count,
+                rejected_count=report.rejected_count,
+            )
+
         raw_records = self._load_source_cache(source_snapshot_hash)
         return self._execute(
             run_id=run_id,
             run_dir=run_dir,
             raw_records=raw_records,
-            output_dir=Path(output_dir),
+            output_dir=destination,
             interrupt_after=None,
         )
 
@@ -454,16 +482,25 @@ class PipelineRunner:
         answers: dict[str, AnswerContent] = {}
         analyses: dict[str, AnalysisContent] = {}
         evidence: dict[str, list[GateResultEvidence]] = {row.record_id: [] for row in raw_records}
-        audits: dict[str, dict[str, Any]] = {
-            row.record_id: _audit_facts(row) for row in raw_records
-        }
+        audits: dict[str, dict[str, Any]] = {}
         rejected: set[str] = set()
+        terminal_accepted: dict[str, UniversityQuestionIR] = {}
 
         for raw in raw_records:
+            current = state.current_stage(run_id, raw.record_id)
+            saved_audit = self._load_audit(run_dir, raw.record_id)
+            audits[raw.record_id] = saved_audit or _audit_facts(raw)
+            if current is RunStage.REJECTED:
+                rejected.add(raw.record_id)
+                continue
+            if current is RunStage.ACCEPTED:
+                terminal_accepted[raw.record_id] = self._load_terminal_ir(run_dir, raw.record_id)
+                continue
+
             acquired_fp = _hash_json(
                 {"source_snapshot": _raw_identity(raw), "raw_sha256": raw.raw_sha256}
             )
-            if state.current_stage(run_id, raw.record_id) is None:
+            if current is None:
                 state.advance(run_id, raw.record_id, RunStage.ACQUIRED, acquired_fp)
 
             candidate = self._load_or_normalize(raw)
@@ -471,8 +508,15 @@ class PipelineRunner:
             integrity = self.processor.integrity(candidate, raw)
             evidence[raw.record_id].append(integrity)
             if integrity.verdict is GateVerdict.REJECT:
-                self._reject(state, run_id, raw.record_id, integrity.reason_code, rejected)
-                audits[raw.record_id]["reject_reason"] = integrity.reason_code
+                self._mark_rejected(
+                    state,
+                    run_id,
+                    run_dir,
+                    raw.record_id,
+                    integrity.reason_code,
+                    rejected,
+                    audits,
+                )
                 continue
 
             normalized_fp = _hash_json(
@@ -481,20 +525,21 @@ class PipelineRunner:
             if state.current_stage(run_id, raw.record_id) is RunStage.ACQUIRED:
                 state.advance(run_id, raw.record_id, RunStage.NORMALIZED, normalized_fp)
             audits[raw.record_id]["normalized"] = True
+            self._save_audit(run_dir, raw.record_id, audits[raw.record_id])
 
-        if interrupt_after is RunStage.NORMALIZED:
-            raise PipelineInterrupted(run_id, RunStage.NORMALIZED)
+        self._interrupt_if_requested(run_id, interrupt_after, RunStage.NORMALIZED)
 
         for raw in raw_records:
-            if raw.record_id in rejected:
+            if raw.record_id in rejected or raw.record_id in terminal_accepted:
                 continue
             candidate = normalized[raw.record_id]
             outcome = self._stage_classification(run_dir, raw.record_id, candidate)
             evidence[raw.record_id].extend(outcome.evidence)
             if outcome.reject_reason is not None or outcome.classification is None:
                 reason = outcome.reject_reason or "UNIVERSITY_LEVEL_UNCERTAIN"
-                self._reject(state, run_id, raw.record_id, reason, rejected)
-                audits[raw.record_id]["reject_reason"] = reason
+                self._mark_rejected(
+                    state, run_id, run_dir, raw.record_id, reason, rejected, audits
+                )
                 continue
             classifications[raw.record_id] = outcome.classification
             fp = self._classification_fingerprint(candidate)
@@ -503,42 +548,64 @@ class PipelineRunner:
             audits[raw.record_id]["university_stem"] = True
             audits[raw.record_id]["problem"] = True
             audits[raw.record_id]["subject"] = outcome.classification.discipline.value
+            self._save_audit(run_dir, raw.record_id, audits[raw.record_id])
+
+        self._interrupt_if_requested(run_id, interrupt_after, RunStage.CLASSIFIED)
 
         for raw in raw_records:
-            if raw.record_id in rejected or raw.record_id not in classifications:
+            if (
+                raw.record_id in rejected
+                or raw.record_id in terminal_accepted
+                or raw.record_id not in classifications
+            ):
                 continue
             candidate = normalized[raw.record_id]
             outcome = self._stage_answer(run_dir, raw.record_id, candidate)
             evidence[raw.record_id].extend(outcome.evidence)
             if outcome.reject_reason is not None or outcome.answer is None:
                 reason = outcome.reject_reason or "ANSWER_NOT_EXTRACTABLE"
-                self._reject(state, run_id, raw.record_id, reason, rejected)
-                audits[raw.record_id]["reject_reason"] = reason
+                self._mark_rejected(
+                    state, run_id, run_dir, raw.record_id, reason, rejected, audits
+                )
                 continue
             answers[raw.record_id] = outcome.answer
             fp = _hash_json(
-                {"content": _candidate_hash(candidate), "threshold": self.config.thresholds.answer_extract}
+                {
+                    "content": _candidate_hash(candidate),
+                    "threshold": self.config.thresholds.answer_extract,
+                }
             )
             if state.current_stage(run_id, raw.record_id) is RunStage.CLASSIFIED:
                 state.advance(run_id, raw.record_id, RunStage.ANSWER_VALIDATED, fp)
             audits[raw.record_id]["answer_valid"] = True
+            self._save_audit(run_dir, raw.record_id, audits[raw.record_id])
+
+        self._interrupt_if_requested(run_id, interrupt_after, RunStage.ANSWER_VALIDATED)
 
         for raw in raw_records:
-            if raw.record_id in rejected or raw.record_id not in answers:
+            if (
+                raw.record_id in rejected
+                or raw.record_id in terminal_accepted
+                or raw.record_id not in answers
+            ):
                 continue
             candidate = normalized[raw.record_id]
             outcome = self._stage_analysis(run_dir, raw.record_id, candidate)
             evidence[raw.record_id].extend(outcome.evidence)
             if outcome.reject_reason is not None or outcome.analysis is None:
                 reason = outcome.reject_reason or "ANALYSIS_UNCERTAIN"
-                self._reject(state, run_id, raw.record_id, reason, rejected)
-                audits[raw.record_id]["reject_reason"] = reason
+                self._mark_rejected(
+                    state, run_id, run_dir, raw.record_id, reason, rejected, audits
+                )
                 continue
             analyses[raw.record_id] = outcome.analysis
             fp = self._analysis_fingerprint(candidate)
             if state.current_stage(run_id, raw.record_id) is RunStage.ANSWER_VALIDATED:
                 state.advance(run_id, raw.record_id, RunStage.ANALYSIS_VALIDATED, fp)
             audits[raw.record_id]["analysis_valid"] = True
+            self._save_audit(run_dir, raw.record_id, audits[raw.record_id])
+
+        self._interrupt_if_requested(run_id, interrupt_after, RunStage.ANALYSIS_VALIDATED)
 
         early_candidates = tuple(
             DedupItem(
@@ -547,28 +614,39 @@ class PipelineRunner:
                 quality_score=_quality_score(evidence[raw.record_id]),
             )
             for raw in raw_records
-            if raw.record_id in analyses and raw.record_id not in rejected
+            if raw.record_id in analyses
+            and raw.record_id not in rejected
+            and raw.record_id not in terminal_accepted
         )
         early = ExactDeduper().deduplicate(early_candidates) if early_candidates else None
         dropped_normalized = set(early.dropped_record_ids if early is not None else ())
         for raw in raw_records:
-            if raw.record_id in rejected or raw.record_id not in analyses:
+            if (
+                raw.record_id in rejected
+                or raw.record_id in terminal_accepted
+                or raw.record_id not in analyses
+            ):
                 continue
-            record_id = normalized[raw.record_id].record_id
-            if record_id in dropped_normalized:
-                self._reject(state, run_id, raw.record_id, "DUPLICATE", rejected)
-                audits[raw.record_id]["reject_reason"] = "DUPLICATE"
+            candidate = normalized[raw.record_id]
+            if candidate.record_id in dropped_normalized:
+                self._mark_rejected(
+                    state, run_id, run_dir, raw.record_id, "DUPLICATE", rejected, audits
+                )
                 continue
-            fp = _hash_json({"exact_hash": ExactDeduper().fingerprint(normalized[raw.record_id])})
+            fp = _hash_json({"exact_hash": ExactDeduper().fingerprint(candidate)})
             if state.current_stage(run_id, raw.record_id) is RunStage.ANALYSIS_VALIDATED:
                 state.advance(run_id, raw.record_id, RunStage.EARLY_DEDUPED, fp)
             audits[raw.record_id]["after_dedup"] = True
+            self._save_audit(run_dir, raw.record_id, audits[raw.record_id])
+
+        self._interrupt_if_requested(run_id, interrupt_after, RunStage.EARLY_DEDUPED)
 
         verified: set[str] = set()
         for raw in raw_records:
-            if raw.record_id in rejected:
+            if raw.record_id in rejected or raw.record_id in terminal_accepted:
                 continue
-            if state.current_stage(run_id, raw.record_id) is not RunStage.EARLY_DEDUPED:
+            current = state.current_stage(run_id, raw.record_id)
+            if current not in {RunStage.EARLY_DEDUPED, RunStage.VERIFIED, RunStage.FINAL_DEDUPED}:
                 continue
             candidate = normalized[raw.record_id]
             outcome = self._stage_verify(run_dir, raw.record_id, candidate)
@@ -576,12 +654,27 @@ class PipelineRunner:
             audits[raw.record_id]["alignment_pass"] = outcome.alignment_pass
             audits[raw.record_id]["correctness_pass"] = outcome.correctness_pass
             if outcome.reject_reason is not None:
-                self._reject(state, run_id, raw.record_id, outcome.reject_reason, rejected)
-                audits[raw.record_id]["reject_reason"] = outcome.reject_reason
+                self._mark_rejected(
+                    state,
+                    run_id,
+                    run_dir,
+                    raw.record_id,
+                    outcome.reject_reason,
+                    rejected,
+                    audits,
+                )
                 continue
-            fp = self._verification_fingerprint(candidate)
-            state.advance(run_id, raw.record_id, RunStage.VERIFIED, fp)
+            if current is RunStage.EARLY_DEDUPED:
+                state.advance(
+                    run_id,
+                    raw.record_id,
+                    RunStage.VERIFIED,
+                    self._verification_fingerprint(candidate),
+                )
             verified.add(raw.record_id)
+            self._save_audit(run_dir, raw.record_id, audits[raw.record_id])
+
+        self._interrupt_if_requested(run_id, interrupt_after, RunStage.VERIFIED)
 
         final_items = tuple(
             DedupItem(
@@ -593,38 +686,63 @@ class PipelineRunner:
         )
         final = ExactDeduper().deduplicate(final_items) if final_items else None
         final_dropped = set(final.dropped_record_ids if final is not None else ())
-        accepted_irs: list[UniversityQuestionIR] = []
+        accepted_by_id = dict(terminal_accepted)
+
         for raw in raw_records:
             if raw.record_id not in verified or raw.record_id in rejected:
                 continue
             candidate = normalized[raw.record_id]
             if candidate.record_id in final_dropped:
-                self._reject(state, run_id, raw.record_id, "DUPLICATE", rejected)
-                audits[raw.record_id]["reject_reason"] = "DUPLICATE"
+                self._mark_rejected(
+                    state, run_id, run_dir, raw.record_id, "DUPLICATE", rejected, audits
+                )
                 continue
-            state.advance(
-                run_id,
-                raw.record_id,
-                RunStage.FINAL_DEDUPED,
-                _hash_json({"final_exact_hash": ExactDeduper().fingerprint(candidate)}),
-            )
-            ir = self._build_ir(
-                raw,
-                candidate,
-                classifications[raw.record_id],
-                answers[raw.record_id],
-                analyses[raw.record_id],
-                tuple(evidence[raw.record_id]),
-            )
-            state.advance(
-                run_id,
-                raw.record_id,
-                RunStage.ACCEPTED,
-                _hash_json({"ir": ir.model_dump(mode="json")}),
-            )
-            audits[raw.record_id]["accepted"] = True
-            accepted_irs.append(ir)
+            current = state.current_stage(run_id, raw.record_id)
+            if current is RunStage.VERIFIED:
+                state.advance(
+                    run_id,
+                    raw.record_id,
+                    RunStage.FINAL_DEDUPED,
+                    _hash_json({"final_exact_hash": ExactDeduper().fingerprint(candidate)}),
+                )
+            try:
+                ir = self._build_ir(
+                    raw,
+                    candidate,
+                    classifications[raw.record_id],
+                    answers[raw.record_id],
+                    analyses[raw.record_id],
+                    tuple(evidence[raw.record_id]),
+                )
+                to_final_record(ir)
+            except ValueError as exc:
+                reason = "LANGUAGE_UNRESOLVED" if str(exc) == "LANGUAGE_UNRESOLVED" else "SCHEMA_VALIDATION_FAILED"
+                self._mark_rejected(
+                    state, run_id, run_dir, raw.record_id, reason, rejected, audits
+                )
+                continue
 
+            accepted_fp = _hash_json({"ir": ir.model_dump(mode="json")})
+            self._write_stage_artifact(
+                run_dir,
+                raw.record_id,
+                "accepted",
+                accepted_fp,
+                {"ir": ir.model_dump(mode="json")},
+            )
+            if state.current_stage(run_id, raw.record_id) is RunStage.FINAL_DEDUPED:
+                state.advance(run_id, raw.record_id, RunStage.ACCEPTED, accepted_fp)
+            audits[raw.record_id]["accepted"] = True
+            self._save_audit(run_dir, raw.record_id, audits[raw.record_id])
+            accepted_by_id[raw.record_id] = ir
+
+        self._interrupt_if_requested(run_id, interrupt_after, RunStage.ACCEPTED)
+
+        accepted_irs = [
+            accepted_by_id[raw.record_id]
+            for raw in raw_records
+            if raw.record_id in accepted_by_id
+        ]
         output_path = export_jsonl(
             (ExportRecord(ir=ir, stage=RunStage.ACCEPTED) for ir in accepted_irs),
             output_dir,
@@ -647,6 +765,15 @@ class PipelineRunner:
             rejected_count=report.rejected_count,
         )
 
+    def _interrupt_if_requested(
+        self,
+        run_id: str,
+        requested: RunStage | None,
+        completed: RunStage,
+    ) -> None:
+        if requested is completed:
+            raise PipelineInterrupted(run_id, completed)
+
     def _stage_classification(
         self,
         run_dir: Path,
@@ -658,7 +785,7 @@ class PipelineRunner:
         if artifact is not None:
             classification_raw = artifact.get("classification")
             classification = (
-                Classification.model_validate(classification_raw)
+                _classification_from_json(classification_raw)
                 if classification_raw is not None
                 else None
             )
@@ -686,15 +813,21 @@ class PipelineRunner:
         return outcome
 
     def _stage_answer(
-        self, run_dir: Path, record_id: str, candidate: NormalizedQA
+        self,
+        run_dir: Path,
+        record_id: str,
+        candidate: NormalizedQA,
     ) -> _AnswerOutcome:
         fingerprint = _hash_json(
-            {"content": _candidate_hash(candidate), "threshold": self.config.thresholds.answer_extract}
+            {
+                "content": _candidate_hash(candidate),
+                "threshold": self.config.thresholds.answer_extract,
+            }
         )
         artifact = self._load_stage_artifact(run_dir, record_id, "answer", fingerprint)
         if artifact is not None:
             value = artifact.get("answer")
-            answer = AnswerContent.model_validate(value) if value is not None else None
+            answer = _answer_from_json(value) if value is not None else None
             return _AnswerOutcome(
                 answer,
                 _evidence_tuple(artifact.get("evidence")),
@@ -715,13 +848,16 @@ class PipelineRunner:
         return outcome
 
     def _stage_analysis(
-        self, run_dir: Path, record_id: str, candidate: NormalizedQA
+        self,
+        run_dir: Path,
+        record_id: str,
+        candidate: NormalizedQA,
     ) -> _AnalysisOutcome:
         fingerprint = self._analysis_fingerprint(candidate)
         artifact = self._load_stage_artifact(run_dir, record_id, "analysis", fingerprint)
         if artifact is not None:
             value = artifact.get("analysis")
-            analysis = AnalysisContent.model_validate(value) if value is not None else None
+            analysis = _analysis_from_json(value) if value is not None else None
             return _AnalysisOutcome(
                 analysis,
                 _evidence_tuple(artifact.get("evidence")),
@@ -742,7 +878,10 @@ class PipelineRunner:
         return outcome
 
     def _stage_verify(
-        self, run_dir: Path, record_id: str, candidate: NormalizedQA
+        self,
+        run_dir: Path,
+        record_id: str,
+        candidate: NormalizedQA,
     ) -> _VerificationOutcome:
         fingerprint = self._verification_fingerprint(candidate)
         artifact = self._load_stage_artifact(run_dir, record_id, "verify", fingerprint)
@@ -812,9 +951,10 @@ class PipelineRunner:
         analysis: AnalysisContent,
         evidence: tuple[GateResultEvidence, ...],
     ) -> UniversityQuestionIR:
-        if candidate.images:
-            if any(not image.startswith("image/") for image in candidate.images):
-                raise ValueError("unresolved source image cannot enter formal Task 14 export")
+        if candidate.images and any(
+            not image.startswith("image/") for image in candidate.images
+        ):
+            raise ValueError("unresolved source image cannot enter formal Task 14 export")
         language = _metadata_text(candidate, "language")
         if language is None or len(language) != 2 or language.lower() != language:
             raise ValueError("LANGUAGE_UNRESOLVED")
@@ -930,22 +1070,52 @@ class PipelineRunner:
             json.dumps(dict(manifest), sort_keys=True, separators=(",", ":")) + "\n",
         )
 
-    def _reject(
+    def _mark_rejected(
         self,
         state: RunStateStore,
         run_id: str,
+        run_dir: Path,
         record_id: str,
         reason: str,
         rejected: set[str],
+        audits: dict[str, dict[str, Any]],
     ) -> None:
         current = state.current_stage(run_id, record_id)
         if current is not RunStage.REJECTED:
             state.advance(run_id, record_id, RunStage.REJECTED, _hash_json({"reason": reason}))
         rejected.add(record_id)
+        audits[record_id]["reject_reason"] = reason
+        audits[record_id]["accepted"] = False
+        self._save_audit(run_dir, record_id, audits[record_id])
 
     def _stage_artifact_path(self, run_dir: Path, record_id: str, stage: str) -> Path:
         safe_id = hashlib.sha256(record_id.encode("utf-8")).hexdigest()
         return run_dir / "stages" / safe_id / f"{stage}.json"
+
+    def _audit_path(self, run_dir: Path, record_id: str) -> Path:
+        safe_id = hashlib.sha256(record_id.encode("utf-8")).hexdigest()
+        return run_dir / "audits" / f"{safe_id}.json"
+
+    def _save_audit(self, run_dir: Path, record_id: str, value: Mapping[str, Any]) -> None:
+        _atomic_write_text(
+            self._audit_path(run_dir, record_id),
+            json.dumps(dict(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            + "\n",
+        )
+
+    def _load_audit(self, run_dir: Path, record_id: str) -> dict[str, Any] | None:
+        path = self._audit_path(run_dir, record_id)
+        return _load_json_object(path) if path.is_file() else None
+
+    def _load_terminal_ir(self, run_dir: Path, record_id: str) -> UniversityQuestionIR:
+        path = self._stage_artifact_path(run_dir, record_id, "accepted")
+        if not path.is_file():
+            raise RuntimeError(f"accepted record {record_id} is missing its terminal IR artifact")
+        payload = _load_json_object(path)
+        value = payload.get("value")
+        if not isinstance(value, dict) or "ir" not in value:
+            raise RuntimeError(f"accepted record {record_id} has malformed terminal IR artifact")
+        return _ir_from_json(value["ir"])
 
     def _load_stage_artifact(
         self,
@@ -1083,12 +1253,14 @@ def _university_level_from_metadata(candidate: NormalizedQA) -> UniversityLevel:
 
 
 def _metadata_text(candidate: NormalizedQA, key: str) -> str | None:
-    value = candidate.model_dump(mode="json")["metadata"].get(key)
+    metadata = candidate.model_dump(mode="json")["metadata"]
+    value = metadata.get(key) if isinstance(metadata, dict) else None
     return value if isinstance(value, str) and value.strip() else None
 
 
 def _metadata_text_tuple(candidate: NormalizedQA, key: str) -> tuple[str, ...]:
-    value = candidate.model_dump(mode="json")["metadata"].get(key)
+    metadata = candidate.model_dump(mode="json")["metadata"]
+    value = metadata.get(key) if isinstance(metadata, dict) else None
     if not isinstance(value, list):
         return ()
     if not all(isinstance(item, str) and item.strip() for item in value):
@@ -1101,10 +1273,66 @@ def _quality_score(evidence: Iterable[GateResultEvidence]) -> float:
     return sum(scores) / len(scores) if scores else 0.0
 
 
+def _classification_from_json(value: object) -> Classification:
+    if not isinstance(value, dict):
+        raise ValueError("classification artifact must be a JSON object")
+    discipline = value.get("discipline")
+    level = value.get("level")
+    problem_type = value.get("problem_type")
+    course = value.get("course")
+    if not isinstance(discipline, str) or not isinstance(level, str) or not isinstance(problem_type, str):
+        raise ValueError("classification artifact enum values must be strings")
+    if course is not None and not isinstance(course, str):
+        raise ValueError("classification artifact course must be text or null")
+    return Classification(
+        discipline=Discipline(discipline),
+        course=course,
+        level=UniversityLevel(level),
+        problem_type=ProblemType(problem_type),
+    )
+
+
+def _answer_from_json(value: object) -> AnswerContent:
+    if not isinstance(value, dict):
+        raise ValueError("answer artifact must be a JSON object")
+    raw = value.get("raw")
+    final_answer = value.get("final_answer")
+    source_span = value.get("source_span")
+    if not isinstance(raw, str):
+        raise ValueError("answer artifact raw must be text")
+    if final_answer is not None and not isinstance(final_answer, str):
+        raise ValueError("answer artifact final_answer must be text or null")
+    if source_span is not None and not isinstance(source_span, str):
+        raise ValueError("answer artifact source_span must be text or null")
+    return AnswerContent(raw=raw, final_answer=final_answer, source_span=source_span)
+
+
+def _analysis_from_json(value: object) -> AnalysisContent:
+    if not isinstance(value, dict):
+        raise ValueError("analysis artifact must be a JSON object")
+    raw = value.get("raw")
+    type_value = value.get("type")
+    if not isinstance(raw, str):
+        raise ValueError("analysis artifact raw must be text")
+    parsed_type = None if type_value is None else AnalysisType(str(type_value))
+    return AnalysisContent(raw=raw, type=parsed_type)
+
+
+def _ir_from_json(value: object) -> UniversityQuestionIR:
+    if not isinstance(value, dict):
+        raise ValueError("terminal IR artifact must be a JSON object")
+    serialized = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return UniversityQuestionIR.model_validate_json(serialized)
+
+
 def _evidence_tuple(value: object) -> tuple[GateResultEvidence, ...]:
     if not isinstance(value, list):
         return ()
-    return tuple(GateResultEvidence.model_validate(item) for item in value)
+    result: list[GateResultEvidence] = []
+    for item in value:
+        serialized = json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+        result.append(GateResultEvidence.model_validate_json(serialized))
+    return tuple(result)
 
 
 def _optional_text(value: object) -> str | None:
