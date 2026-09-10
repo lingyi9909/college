@@ -1,0 +1,26 @@
+name: Task 15 Cancel Duplicate 5K Runs
+
+on:
+  push:
+    branches:
+      - ci/task15-cancel-duplicate-5k
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel duplicate formal 5K runs only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for run_id in 34469967172 34469978262; do
+            echo "Cancelling duplicate run ${run_id}"
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+          done
+          echo "Preserved formal run 34470020327"
