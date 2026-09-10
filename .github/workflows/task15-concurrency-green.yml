@@ -1,0 +1,142 @@
+name: Task 15 Pipeline Concurrency GREEN
+
+on:
+  push:
+    branches:
+      - ci/task15-concurrency-green
+
+permissions:
+  contents: write
+
+jobs:
+  green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/task15-pilot-freeze
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+
+      - name: Implement bounded model-stage concurrency
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/college_builder/pipeline/runner.py')
+          text = path.read_text(encoding='utf-8')
+
+          text = text.replace(
+              'import time\nfrom collections import Counter\n',
+              'import time\nfrom collections import Counter\nfrom concurrent.futures import ThreadPoolExecutor\n',
+              1,
+          )
+          text = text.replace(
+              'from dataclasses import dataclass\n',
+              'from dataclasses import dataclass, field\n',
+              1,
+          )
+          text = text.replace(
+              'from pathlib import Path\nfrom typing import Any, cast\n',
+              'from pathlib import Path\nfrom threading import BoundedSemaphore, Lock\nfrom typing import Any, TypeVar, cast\n',
+              1,
+          )
+          text = text.replace(
+              '_PROMPT_LOADER = Callable[[str, str], str]\n',
+              '_PROMPT_LOADER = Callable[[str, str], str]\n_STAGE_RESULT = TypeVar("_STAGE_RESULT")\n',
+              1,
+          )
+          text = text.replace(
+              'class _UsageAccumulator:\n    provider_call_counts: Counter[str]\n    cache_hits: int = 0\n    cache_misses: int = 0\n    latency_seconds: float = 0.0\n    provider_errors: int = 0\n',
+              'class _UsageAccumulator:\n    provider_call_counts: Counter[str]\n    cache_hits: int = 0\n    cache_misses: int = 0\n    latency_seconds: float = 0.0\n    provider_errors: int = 0\n    lock: Any = field(default_factory=Lock, repr=False)\n',
+              1,
+          )
+          text = text.replace(
+              '        gate_config_fingerprints: Mapping[str, str],\n        usage: _UsageAccumulator,\n    ) -> None:\n',
+              '        gate_config_fingerprints: Mapping[str, str],\n        usage: _UsageAccumulator,\n        max_concurrency: int,\n    ) -> None:\n',
+              1,
+          )
+          text = text.replace(
+              '        self._gate_config_fingerprints = dict(gate_config_fingerprints)\n        self._usage = usage\n',
+              '        self._gate_config_fingerprints = dict(gate_config_fingerprints)\n        self._usage = usage\n        self._semaphore = BoundedSemaphore(max_concurrency)\n',
+              1,
+          )
+          text = text.replace(
+              '        if cached is not None:\n            self._usage.cache_hits += 1\n            return ModelDecision.model_validate(cached)\n\n        self._usage.cache_misses += 1\n        self._usage.provider_call_counts[request.task] += 1\n',
+              '        if cached is not None:\n            with self._usage.lock:\n                self._usage.cache_hits += 1\n            return ModelDecision.model_validate(cached)\n\n        with self._usage.lock:\n            self._usage.cache_misses += 1\n            self._usage.provider_call_counts[request.task] += 1\n',
+              1,
+          )
+          text = text.replace(
+              '        try:\n            raw: object = self._provider.classify(request)\n',
+              '        try:\n            with self._semaphore:\n                raw: object = self._provider.classify(request)\n',
+              1,
+          )
+          text = text.replace(
+              '        except Exception:\n            self._usage.provider_errors += 1\n            raise\n        finally:\n            self._usage.latency_seconds += time.perf_counter() - started\n',
+              '        except Exception:\n            with self._usage.lock:\n                self._usage.provider_errors += 1\n            raise\n        finally:\n            elapsed = time.perf_counter() - started\n            with self._usage.lock:\n                self._usage.latency_seconds += elapsed\n',
+              1,
+          )
+          text = text.replace(
+              '            gate_config_fingerprints=gate_config_fingerprints,\n            usage=self._usage,\n        )\n        verifier = _CachedStructuredProvider(\n',
+              '            gate_config_fingerprints=gate_config_fingerprints,\n            usage=self._usage,\n            max_concurrency=config.concurrency.classifier,\n        )\n        verifier = _CachedStructuredProvider(\n',
+              1,
+          )
+          text = text.replace(
+              '            gate_config_fingerprints=gate_config_fingerprints,\n            usage=self._usage,\n        )\n        self._integrity = IntegrityGate()\n',
+              '            gate_config_fingerprints=gate_config_fingerprints,\n            usage=self._usage,\n            max_concurrency=config.concurrency.verifier,\n        )\n        self._integrity = IntegrityGate()\n',
+              1,
+          )
+          old_usage = '''    @property\n    def provider_usage(self) -> ProviderUsage:\n        return ProviderUsage(\n            provider_call_counts=dict(self._usage.provider_call_counts),\n            cache_hits=self._usage.cache_hits,\n            cache_misses=self._usage.cache_misses,\n            latency_seconds=self._usage.latency_seconds,\n            tokens=0,\n            estimated_cost_usd=0.0,\n            fallback_count=0,\n            provider_errors=self._usage.provider_errors,\n        )\n'''
+          new_usage = '''    @property\n    def provider_usage(self) -> ProviderUsage:\n        with self._usage.lock:\n            return ProviderUsage(\n                provider_call_counts=dict(self._usage.provider_call_counts),\n                cache_hits=self._usage.cache_hits,\n                cache_misses=self._usage.cache_misses,\n                latency_seconds=self._usage.latency_seconds,\n                tokens=0,\n                estimated_cost_usd=0.0,\n                fallback_count=0,\n                provider_errors=self._usage.provider_errors,\n            )\n'''
+          assert old_usage in text
+          text = text.replace(old_usage, new_usage, 1)
+
+          classify_loop = '        for raw in raw_records:\n            if raw.record_id in rejected or raw.record_id in terminal_accepted:\n                continue\n            candidate = normalized[raw.record_id]\n            classification_outcome = self._stage_classification(run_dir, raw.record_id, candidate)\n'
+          classify_prefetch = '''        classification_records = tuple(\n            raw\n            for raw in raw_records\n            if raw.record_id not in rejected and raw.record_id not in terminal_accepted\n        )\n        classification_outcomes = self._parallel_model_stage(\n            classification_records,\n            lambda raw: self._stage_classification(\n                run_dir, raw.record_id, normalized[raw.record_id]\n            ),\n            max_workers=self.config.concurrency.classifier,\n        )\n        classification_by_id = dict(\n            zip(\n                (raw.record_id for raw in classification_records),\n                classification_outcomes,\n                strict=True,\n            )\n        )\n\n        for raw in raw_records:\n            if raw.record_id in rejected or raw.record_id in terminal_accepted:\n                continue\n            candidate = normalized[raw.record_id]\n            classification_outcome = classification_by_id[raw.record_id]\n'''
+          assert classify_loop in text
+          text = text.replace(classify_loop, classify_prefetch, 1)
+
+          analysis_loop = '''        for raw in raw_records:\n            if (\n                raw.record_id in rejected\n                or raw.record_id in terminal_accepted\n                or raw.record_id not in answers\n            ):\n                continue\n            candidate = normalized[raw.record_id]\n            analysis_outcome = self._stage_analysis(run_dir, raw.record_id, candidate)\n'''
+          analysis_prefetch = '''        analysis_records = tuple(\n            raw\n            for raw in raw_records\n            if raw.record_id not in rejected\n            and raw.record_id not in terminal_accepted\n            and raw.record_id in answers\n        )\n        analysis_outcomes = self._parallel_model_stage(\n            analysis_records,\n            lambda raw: self._stage_analysis(\n                run_dir, raw.record_id, normalized[raw.record_id]\n            ),\n            max_workers=self.config.concurrency.classifier,\n        )\n        analysis_by_id = dict(\n            zip(\n                (raw.record_id for raw in analysis_records),\n                analysis_outcomes,\n                strict=True,\n            )\n        )\n\n        for raw in raw_records:\n            if (\n                raw.record_id in rejected\n                or raw.record_id in terminal_accepted\n                or raw.record_id not in answers\n            ):\n                continue\n            candidate = normalized[raw.record_id]\n            analysis_outcome = analysis_by_id[raw.record_id]\n'''
+          assert analysis_loop in text
+          text = text.replace(analysis_loop, analysis_prefetch, 1)
+
+          verify_loop = '''        verified: set[str] = set()\n        for raw in raw_records:\n            if raw.record_id in rejected or raw.record_id in terminal_accepted:\n                continue\n            current = state.current_stage(run_id, raw.record_id)\n            if current not in {RunStage.EARLY_DEDUPED, RunStage.VERIFIED, RunStage.FINAL_DEDUPED}:\n                continue\n            candidate = normalized[raw.record_id]\n            verification_outcome = self._stage_verify(run_dir, raw.record_id, candidate)\n'''
+          verify_prefetch = '''        verified: set[str] = set()\n        verification_records = tuple(\n            raw\n            for raw in raw_records\n            if raw.record_id not in rejected\n            and raw.record_id not in terminal_accepted\n            and state.current_stage(run_id, raw.record_id)\n            in {RunStage.EARLY_DEDUPED, RunStage.VERIFIED, RunStage.FINAL_DEDUPED}\n        )\n        verification_outcomes = self._parallel_model_stage(\n            verification_records,\n            lambda raw: self._stage_verify(\n                run_dir, raw.record_id, normalized[raw.record_id]\n            ),\n            max_workers=self.config.concurrency.verifier,\n        )\n        verification_by_id = dict(\n            zip(\n                (raw.record_id for raw in verification_records),\n                verification_outcomes,\n                strict=True,\n            )\n        )\n\n        for raw in raw_records:\n            if raw.record_id in rejected or raw.record_id in terminal_accepted:\n                continue\n            current = state.current_stage(run_id, raw.record_id)\n            if current not in {RunStage.EARLY_DEDUPED, RunStage.VERIFIED, RunStage.FINAL_DEDUPED}:\n                continue\n            candidate = normalized[raw.record_id]\n            verification_outcome = verification_by_id[raw.record_id]\n'''
+          assert verify_loop in text
+          text = text.replace(verify_loop, verify_prefetch, 1)
+
+          marker = '    def _interrupt_if_requested(\n'
+          helper = '''    @staticmethod\n    def _parallel_model_stage(\n        records: tuple[RawSourceRecord, ...],\n        worker: Callable[[RawSourceRecord], _STAGE_RESULT],\n        *,\n        max_workers: int,\n    ) -> tuple[_STAGE_RESULT, ...]:\n        if not records:\n            return ()\n        if max_workers == 1:\n            return tuple(worker(record) for record in records)\n        with ThreadPoolExecutor(\n            max_workers=max_workers,\n            thread_name_prefix="college-model-stage",\n        ) as executor:\n            return tuple(executor.map(worker, records))\n\n'''
+          assert marker in text
+          text = text.replace(marker, helper + marker, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Targeted concurrency and resume regressions
+        run: pytest -q tests/e2e/test_task15_pipeline_concurrency.py tests/e2e/test_pipeline_resume.py
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
+
+      - name: Commit verified production change to Task 15 feature
+        shell: bash
+        run: |
+          git config user.name "lingyi9909"
+          git config user.email "zhanhui9909@gmail.com"
+          git add src/college_builder/pipeline/runner.py tests/e2e/test_task15_pipeline_concurrency.py
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 1
+          fi
+          git commit -m "perf: honor Task 15 model concurrency"
+          git push origin HEAD:feature/task15-pilot-freeze
