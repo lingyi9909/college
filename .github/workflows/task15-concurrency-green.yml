@@ -121,8 +121,8 @@ jobs:
 
       - name: Normalize changed-file formatting
         run: |
-          ruff check src/college_builder/pipeline/runner.py tests/e2e/test_task15_pipeline_concurrency.py --fix
           ruff format src/college_builder/pipeline/runner.py tests/e2e/test_task15_pipeline_concurrency.py
+          ruff check src/college_builder/pipeline/runner.py tests/e2e/test_task15_pipeline_concurrency.py --fix
 
       - name: Targeted concurrency and resume regressions
         run: pytest -q tests/e2e/test_task15_pipeline_concurrency.py tests/e2e/test_pipeline_resume.py
