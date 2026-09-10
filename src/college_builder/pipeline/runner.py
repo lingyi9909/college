@@ -8,10 +8,12 @@ import re
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from threading import BoundedSemaphore, Lock
+from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -66,6 +68,7 @@ from college_builder.storage.state import RunStage, RunStateStore
 
 _NORMALIZER = Callable[[RawSourceRecord], NormalizedQA]
 _PROMPT_LOADER = Callable[[str, str], str]
+_STAGE_RESULT = TypeVar("_STAGE_RESULT")
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +143,7 @@ class _UsageAccumulator:
     cache_misses: int = 0
     latency_seconds: float = 0.0
     provider_errors: int = 0
+    lock: Any = field(default_factory=Lock, repr=False)
 
 
 class _CachedStructuredProvider:
@@ -153,6 +157,7 @@ class _CachedStructuredProvider:
         prompt_versions: Mapping[str, str],
         gate_config_fingerprints: Mapping[str, str],
         usage: _UsageAccumulator,
+        max_concurrency: int,
     ) -> None:
         self._provider = provider
         self.provider = provider.provider
@@ -161,6 +166,7 @@ class _CachedStructuredProvider:
         self._prompt_versions = dict(prompt_versions)
         self._gate_config_fingerprints = dict(gate_config_fingerprints)
         self._usage = usage
+        self._semaphore = BoundedSemaphore(max_concurrency)
 
     def classify(self, request: ModelClassificationRequest) -> ModelDecision:
         prompt_version = self._prompt_versions.get(request.task)
@@ -178,22 +184,28 @@ class _CachedStructuredProvider:
         )
         cached = self._cache.get(cache_key)
         if cached is not None:
-            self._usage.cache_hits += 1
+            with self._usage.lock:
+                self._usage.cache_hits += 1
             return ModelDecision.model_validate(cached)
 
-        self._usage.cache_misses += 1
-        self._usage.provider_call_counts[request.task] += 1
+        with self._usage.lock:
+            self._usage.cache_misses += 1
+            self._usage.provider_call_counts[request.task] += 1
         started = time.perf_counter()
         try:
-            raw: object = self._provider.classify(request)
+            with self._semaphore:
+                raw: object = self._provider.classify(request)
             if not isinstance(raw, ModelDecision):
                 raise TypeError("provider returned non-ModelDecision output")
             validated = ModelDecision.model_validate(raw.model_dump(mode="python", warnings=False))
         except Exception:
-            self._usage.provider_errors += 1
+            with self._usage.lock:
+                self._usage.provider_errors += 1
             raise
         finally:
-            self._usage.latency_seconds += time.perf_counter() - started
+            elapsed = time.perf_counter() - started
+            with self._usage.lock:
+                self._usage.latency_seconds += elapsed
         self._cache.put(cache_key, validated.model_dump(mode="json"))
         return validated
 
@@ -244,6 +256,7 @@ class GatePipelineProcessor:
             prompt_versions=prompt_versions,
             gate_config_fingerprints=gate_config_fingerprints,
             usage=self._usage,
+            max_concurrency=config.concurrency.classifier,
         )
         verifier = _CachedStructuredProvider(
             provider=verifier_provider,
@@ -251,6 +264,7 @@ class GatePipelineProcessor:
             prompt_versions=prompt_versions,
             gate_config_fingerprints=gate_config_fingerprints,
             usage=self._usage,
+            max_concurrency=config.concurrency.verifier,
         )
         self._integrity = IntegrityGate()
         self._university = UniversityStemGate(
@@ -289,16 +303,17 @@ class GatePipelineProcessor:
 
     @property
     def provider_usage(self) -> ProviderUsage:
-        return ProviderUsage(
-            provider_call_counts=dict(self._usage.provider_call_counts),
-            cache_hits=self._usage.cache_hits,
-            cache_misses=self._usage.cache_misses,
-            latency_seconds=self._usage.latency_seconds,
-            tokens=0,
-            estimated_cost_usd=0.0,
-            fallback_count=0,
-            provider_errors=self._usage.provider_errors,
-        )
+        with self._usage.lock:
+            return ProviderUsage(
+                provider_call_counts=dict(self._usage.provider_call_counts),
+                cache_hits=self._usage.cache_hits,
+                cache_misses=self._usage.cache_misses,
+                latency_seconds=self._usage.latency_seconds,
+                tokens=0,
+                estimated_cost_usd=0.0,
+                fallback_count=0,
+                provider_errors=self._usage.provider_errors,
+            )
 
     def integrity(self, candidate: NormalizedQA, raw: RawSourceRecord) -> GateResultEvidence:
         context = GateContext(
@@ -592,11 +607,31 @@ class PipelineRunner:
 
         self._interrupt_if_requested(run_id, interrupt_after, RunStage.NORMALIZED)
 
+        classification_records = tuple(
+            raw
+            for raw in raw_records
+            if raw.record_id not in rejected and raw.record_id not in terminal_accepted
+        )
+        classification_outcomes = self._parallel_model_stage(
+            classification_records,
+            lambda raw: self._stage_classification(
+                run_dir, raw.record_id, normalized[raw.record_id]
+            ),
+            max_workers=self.config.concurrency.classifier,
+        )
+        classification_by_id = dict(
+            zip(
+                (raw.record_id for raw in classification_records),
+                classification_outcomes,
+                strict=True,
+            )
+        )
+
         for raw in raw_records:
             if raw.record_id in rejected or raw.record_id in terminal_accepted:
                 continue
             candidate = normalized[raw.record_id]
-            classification_outcome = self._stage_classification(run_dir, raw.record_id, candidate)
+            classification_outcome = classification_by_id[raw.record_id]
             evidence[raw.record_id].extend(classification_outcome.evidence)
             if (
                 classification_outcome.reject_reason is not None
@@ -684,6 +719,26 @@ class PipelineRunner:
 
         self._interrupt_if_requested(run_id, interrupt_after, RunStage.ANSWER_VALIDATED)
 
+        analysis_records = tuple(
+            raw
+            for raw in raw_records
+            if raw.record_id not in rejected
+            and raw.record_id not in terminal_accepted
+            and raw.record_id in answers
+        )
+        analysis_outcomes = self._parallel_model_stage(
+            analysis_records,
+            lambda raw: self._stage_analysis(run_dir, raw.record_id, normalized[raw.record_id]),
+            max_workers=self.config.concurrency.classifier,
+        )
+        analysis_by_id = dict(
+            zip(
+                (raw.record_id for raw in analysis_records),
+                analysis_outcomes,
+                strict=True,
+            )
+        )
+
         for raw in raw_records:
             if (
                 raw.record_id in rejected
@@ -692,7 +747,7 @@ class PipelineRunner:
             ):
                 continue
             candidate = normalized[raw.record_id]
-            analysis_outcome = self._stage_analysis(run_dir, raw.record_id, candidate)
+            analysis_outcome = analysis_by_id[raw.record_id]
             evidence[raw.record_id].extend(analysis_outcome.evidence)
             if analysis_outcome.reject_reason is not None or analysis_outcome.analysis is None:
                 reason = analysis_outcome.reject_reason or "ANALYSIS_UNCERTAIN"
@@ -761,6 +816,27 @@ class PipelineRunner:
         self._interrupt_if_requested(run_id, interrupt_after, RunStage.EARLY_DEDUPED)
 
         verified: set[str] = set()
+        verification_records = tuple(
+            raw
+            for raw in raw_records
+            if raw.record_id not in rejected
+            and raw.record_id not in terminal_accepted
+            and state.current_stage(run_id, raw.record_id)
+            in {RunStage.EARLY_DEDUPED, RunStage.VERIFIED, RunStage.FINAL_DEDUPED}
+        )
+        verification_outcomes = self._parallel_model_stage(
+            verification_records,
+            lambda raw: self._stage_verify(run_dir, raw.record_id, normalized[raw.record_id]),
+            max_workers=self.config.concurrency.verifier,
+        )
+        verification_by_id = dict(
+            zip(
+                (raw.record_id for raw in verification_records),
+                verification_outcomes,
+                strict=True,
+            )
+        )
+
         for raw in raw_records:
             if raw.record_id in rejected or raw.record_id in terminal_accepted:
                 continue
@@ -768,7 +844,7 @@ class PipelineRunner:
             if current not in {RunStage.EARLY_DEDUPED, RunStage.VERIFIED, RunStage.FINAL_DEDUPED}:
                 continue
             candidate = normalized[raw.record_id]
-            verification_outcome = self._stage_verify(run_dir, raw.record_id, candidate)
+            verification_outcome = verification_by_id[raw.record_id]
             evidence[raw.record_id].extend(verification_outcome.evidence)
             audits[raw.record_id]["alignment_pass"] = verification_outcome.alignment_pass
             audits[raw.record_id]["correctness_pass"] = verification_outcome.correctness_pass
@@ -919,6 +995,23 @@ class PipelineRunner:
             accepted_count=report.accepted_count,
             rejected_count=report.rejected_count,
         )
+
+    @staticmethod
+    def _parallel_model_stage(
+        records: tuple[RawSourceRecord, ...],
+        worker: Callable[[RawSourceRecord], _STAGE_RESULT],
+        *,
+        max_workers: int,
+    ) -> tuple[_STAGE_RESULT, ...]:
+        if not records:
+            return ()
+        if max_workers == 1:
+            return tuple(worker(record) for record in records)
+        with ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="college-model-stage",
+        ) as executor:
+            return tuple(executor.map(worker, records))
 
     def _interrupt_if_requested(
         self,
