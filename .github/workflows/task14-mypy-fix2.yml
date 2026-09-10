@@ -1,0 +1,51 @@
+name: Task 14 MyPy Fix 2
+on:
+  push:
+    branches: [verification/task14-mypy-fix2]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/task14-pipeline-runner
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - name: Apply final type edits
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/college_builder/pipeline/runner.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              'from college_builder.quality.engine import GateContext, GateEngine, GateResultEvidence',
+              'from college_builder.quality.engine import (\n    GateContext,\n    GateEngine,\n    GateResultEvidence,\n    QualityGate,\n)',
+          )
+          text = text.replace(
+              'GateEngine[NormalizedQA](gates=(self._university,), context=context)',
+              'GateEngine[NormalizedQA](\n            gates=(cast(QualityGate[NormalizedQA], self._university),), context=context\n        )',
+          )
+          text = text.replace(
+              'GateEngine[NormalizedQA](gates=(self._problem,), context=context)',
+              'GateEngine[NormalizedQA](\n            gates=(cast(QualityGate[NormalizedQA], self._problem),), context=context\n        )',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+          ruff format src/college_builder/pipeline/runner.py
+          git diff --check
+      - run: pytest tests/e2e/test_pipeline_resume.py tests/e2e/test_pipeline_report.py -q
+      - run: ruff check src tests
+      - run: mypy src
+      - name: Commit verified type fix to feature
+        run: |
+          git config user.name lingyi9909
+          git config user.email zhanhui9909@gmail.com
+          git add src/college_builder/pipeline/runner.py
+          git commit -m 'fix: type approved classification gates'
+          git push origin HEAD:feature/task14-pipeline-runner
