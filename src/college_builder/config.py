@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 NonEmptyStr = Annotated[str, Field(min_length=1)]
 Score = Annotated[float, Field(ge=0.0, le=1.0)]
 PositiveConcurrency = Annotated[int, Field(ge=1)]
+ProviderTimeoutSeconds = Annotated[float, Field(gt=0.0, le=600.0)]
+ProviderMaxAttempts = Annotated[int, Field(ge=1, le=6)]
+ProviderRetryBackoffSeconds = Annotated[float, Field(ge=0.0, le=60.0)]
 ProviderName = Literal["fake", "openai_compatible"]
 
 
@@ -27,6 +30,9 @@ class ThresholdConfig(ConfigModel):
 class ProviderConfig(ConfigModel):
     name: ProviderName
     model: NonEmptyStr
+    timeout_seconds: ProviderTimeoutSeconds = 30.0
+    max_attempts: ProviderMaxAttempts = 3
+    retry_backoff_seconds: ProviderRetryBackoffSeconds = 0.5
 
 
 class ProviderSet(ConfigModel):
