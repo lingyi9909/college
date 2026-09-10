@@ -1,0 +1,22 @@
+name: Task 15 Green2
+on: push
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 94735f13759df19a8bcd84083691d3c1b139a820
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - run: git rev-parse HEAD
+      - name: Task 15 targeted
+        run: pytest tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_5k.py tests/e2e/test_pilot_sample_command.py tests/e2e/test_gold_regression.py tests/unit/source/test_gold.py tests/unit/source/test_stackmathqa.py -q
+      - name: Full tests
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
