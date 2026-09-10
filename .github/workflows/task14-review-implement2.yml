@@ -1,0 +1,62 @@
+name: Task 14 Review Implement 2
+on:
+  push:
+    branches:
+      - ci/task14-review-implement2
+permissions:
+  contents: write
+jobs:
+  implement:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/task14-review-blockers
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Reapply verified behavioral patch with import fix
+        run: |
+          python - <<'PY'
+          import subprocess
+          import yaml
+
+          raw = subprocess.check_output(
+              [
+                  'git', 'show',
+                  'origin/ci/task14-review-implement:.github/workflows/task14-review-implement.yml',
+              ],
+              text=True,
+          )
+          workflow = yaml.safe_load(raw)
+          steps = workflow['jobs']['implement']['steps']
+          scripts = {step.get('name'): step.get('run') for step in steps if isinstance(step, dict)}
+
+          language = scripts['Add deterministic language rejection regression']
+          patch = scripts['Apply minimal Task 14 production fixes']
+          assert isinstance(language, str)
+          assert isinstance(patch, str)
+          patch = patch.replace(
+              'ruff format src/college_builder/pipeline/runner.py src/college_builder/reporting/pilot_report.py tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py\ngit diff --check',
+              'ruff format src/college_builder/pipeline/runner.py src/college_builder/reporting/pilot_report.py tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py\nruff check --fix src/college_builder/pipeline/runner.py\ngit diff --check',
+          )
+          subprocess.run(['bash', '-e', '-c', language], check=True)
+          subprocess.run(['bash', '-e', '-c', patch], check=True)
+          PY
+      - name: Targeted Task 14 E2E
+        run: pytest tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py -q
+      - name: Full tests
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
+      - name: Commit verified repair to fix branch
+        run: |
+          git config user.name lingyi9909
+          git config user.email zhanhui9909@gmail.com
+          git add src/college_builder/pipeline/runner.py src/college_builder/reporting/pilot_report.py tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py
+          git commit -m 'fix: close Task 14 review blockers'
+          git push origin HEAD:fix/task14-review-blockers
