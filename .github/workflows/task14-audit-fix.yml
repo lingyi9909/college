@@ -1,0 +1,77 @@
+name: Task 14 Audit Fix
+on: [push]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/task14-pipeline-runner
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Apply Task 14 audit/resume fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/college_builder/pipeline/runner.py')
+          t = p.read_text(encoding='utf-8')
+
+          old = '''        return self._execute(\n            run_id=run_id,\n            run_dir=run_dir,\n            raw_records=raw_records,\n            output_dir=Path(output_dir),\n            interrupt_after=interrupt_after,\n        )\n'''
+          new = '''        usage_prior = _load_provider_usage(run_dir / "provider_usage.json")\n        usage_baseline = self.processor.provider_usage\n        try:\n            return self._execute(\n                run_id=run_id,\n                run_dir=run_dir,\n                raw_records=raw_records,\n                output_dir=Path(output_dir),\n                interrupt_after=interrupt_after,\n                usage_prior=usage_prior,\n                usage_baseline=usage_baseline,\n            )\n        except PipelineInterrupted:\n            _write_provider_usage(\n                run_dir / "provider_usage.json",\n                _merge_provider_usage(\n                    usage_prior,\n                    _provider_usage_delta(usage_baseline, self.processor.provider_usage),\n                ),\n            )\n            raise\n'''
+          assert old in t
+          t = t.replace(old, new, 1)
+
+          old = '''        raw_records = self._load_source_cache(source_snapshot_hash)\n        return self._execute(\n            run_id=run_id,\n            run_dir=run_dir,\n            raw_records=raw_records,\n            output_dir=destination,\n            interrupt_after=None,\n        )\n'''
+          new = '''        raw_records = self._load_source_cache(source_snapshot_hash)\n        usage_prior = _load_provider_usage(run_dir / "provider_usage.json")\n        usage_baseline = self.processor.provider_usage\n        return self._execute(\n            run_id=run_id,\n            run_dir=run_dir,\n            raw_records=raw_records,\n            output_dir=destination,\n            interrupt_after=None,\n            usage_prior=usage_prior,\n            usage_baseline=usage_baseline,\n        )\n'''
+          assert old in t
+          t = t.replace(old, new, 1)
+
+          old = '''        output_dir: Path,\n        interrupt_after: RunStage | None,\n    ) -> PipelineRunResult:\n'''
+          new = '''        output_dir: Path,\n        interrupt_after: RunStage | None,\n        usage_prior: ProviderUsage,\n        usage_baseline: ProviderUsage,\n    ) -> PipelineRunResult:\n'''
+          assert old in t
+          t = t.replace(old, new, 1)
+
+          old = '''            if (\n                classification_outcome.reject_reason is not None\n                or classification_outcome.classification is None\n            ):\n                reason = classification_outcome.reject_reason or "UNIVERSITY_LEVEL_UNCERTAIN"\n                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)\n                continue\n'''
+          new = '''            if (\n                classification_outcome.reject_reason is not None\n                or classification_outcome.classification is None\n            ):\n                reason = classification_outcome.reject_reason or "UNIVERSITY_LEVEL_UNCERTAIN"\n                university_label = (\n                    _decision_label(classification_outcome.evidence[0])\n                    if classification_outcome.evidence\n                    else None\n                )\n                if university_label == "NON_UNIVERSITY_STEM":\n                    audits[raw.record_id]["stem"] = True\n                    audits[raw.record_id]["university"] = False\n                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)\n                continue\n'''
+          assert old in t
+          t = t.replace(old, new, 1)
+
+          old = '''            audits[raw.record_id]["university_stem"] = True\n            audits[raw.record_id]["problem"] = True\n'''
+          new = '''            audits[raw.record_id]["stem"] = True\n            audits[raw.record_id]["university"] = True\n            audits[raw.record_id]["university_stem"] = True\n            audits[raw.record_id]["problem"] = True\n'''
+          assert old in t
+          t = t.replace(old, new, 1)
+
+          old = '''        report = build_pilot_report(\n            run_id=run_id,\n            audits=audit_rows,\n            provider_usage=self.processor.provider_usage,\n            wall_time_seconds=time.perf_counter() - started,\n        )\n'''
+          new = '''        provider_usage = _merge_provider_usage(\n            usage_prior,\n            _provider_usage_delta(usage_baseline, self.processor.provider_usage),\n        )\n        _write_provider_usage(run_dir / "provider_usage.json", provider_usage)\n        report = build_pilot_report(\n            run_id=run_id,\n            audits=audit_rows,\n            provider_usage=provider_usage,\n            wall_time_seconds=time.perf_counter() - started,\n        )\n'''
+          assert old in t
+          t = t.replace(old, new, 1)
+
+          old = '''        "normalized": False,\n        "university_stem": False,\n        "problem": False,\n'''
+          new = '''        "normalized": False,\n        "stem": False,\n        "university": False,\n        "university_stem": False,\n        "problem": False,\n'''
+          assert old in t
+          t = t.replace(old, new, 1)
+
+          marker = '''\ndef _source_snapshot_hash(descriptors: tuple[SourceDescriptor, ...]) -> str:\n'''
+          helpers = '''\ndef _load_provider_usage(path: Path) -> ProviderUsage:\n    if not path.is_file():\n        return ProviderUsage()\n    return ProviderUsage.model_validate_json(path.read_text(encoding="utf-8"))\n\n\ndef _write_provider_usage(path: Path, usage: ProviderUsage) -> None:\n    _atomic_write_text(\n        path,\n        json.dumps(\n            usage.model_dump(mode="json"),\n            ensure_ascii=False,\n            sort_keys=True,\n            separators=(",", ":"),\n        )\n        + "\\n",\n    )\n\n\ndef _provider_usage_delta(before: ProviderUsage, after: ProviderUsage) -> ProviderUsage:\n    keys = set(before.provider_call_counts) | set(after.provider_call_counts)\n    calls = {\n        key: after.provider_call_counts.get(key, 0) - before.provider_call_counts.get(key, 0)\n        for key in keys\n        if after.provider_call_counts.get(key, 0) > before.provider_call_counts.get(key, 0)\n    }\n    return ProviderUsage(\n        provider_call_counts=calls,\n        cache_hits=max(0, after.cache_hits - before.cache_hits),\n        cache_misses=max(0, after.cache_misses - before.cache_misses),\n        latency_seconds=max(0.0, after.latency_seconds - before.latency_seconds),\n        tokens=max(0, after.tokens - before.tokens),\n        estimated_cost_usd=max(0.0, after.estimated_cost_usd - before.estimated_cost_usd),\n        fallback_count=max(0, after.fallback_count - before.fallback_count),\n        provider_errors=max(0, after.provider_errors - before.provider_errors),\n    )\n\n\ndef _merge_provider_usage(left: ProviderUsage, right: ProviderUsage) -> ProviderUsage:\n    calls = Counter(left.provider_call_counts)\n    calls.update(right.provider_call_counts)\n    return ProviderUsage(\n        provider_call_counts=dict(calls),\n        cache_hits=left.cache_hits + right.cache_hits,\n        cache_misses=left.cache_misses + right.cache_misses,\n        latency_seconds=left.latency_seconds + right.latency_seconds,\n        tokens=left.tokens + right.tokens,\n        estimated_cost_usd=left.estimated_cost_usd + right.estimated_cost_usd,\n        fallback_count=left.fallback_count + right.fallback_count,\n        provider_errors=left.provider_errors + right.provider_errors,\n    )\n\n\ndef _source_snapshot_hash(descriptors: tuple[SourceDescriptor, ...]) -> str:\n'''
+          assert marker in t
+          t = t.replace(marker, helpers, 1)
+          p.write_text(t, encoding='utf-8')
+          PY
+          ruff format src/college_builder/pipeline/runner.py src/college_builder/reporting/pilot_report.py tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py
+          git diff --check
+      - run: pytest tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py -q
+      - run: pytest -q
+      - run: ruff check src tests
+      - run: mypy src
+      - name: Commit verified fix to feature
+        run: |
+          git config user.name lingyi9909
+          git config user.email zhanhui9909@gmail.com
+          git add src/college_builder/pipeline/runner.py src/college_builder/reporting/pilot_report.py tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py
+          git commit -m 'fix: harden Task 14 funnel and resume usage reporting'
+          git push origin HEAD:feature/task14-pipeline-runner
