@@ -1,0 +1,284 @@
+name: Task 15 Real Four-Strata Model Micro Run
+
+on:
+  push:
+    branches:
+      - ci/task15-real-micro-run
+
+permissions:
+  contents: read
+  copilot-requests: write
+
+jobs:
+  micro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ba7056219064c529ea0d7eabd898a901fffdc6e4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -e '.[dev]'
+      - run: npm install -g @github/copilot
+
+      - name: Select four short real records that satisfy deterministic answer extraction
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          from pathlib import Path
+
+          from college_builder.normalize.normalizer import normalize
+          from college_builder.quality.answer import extract_source_answer
+          from college_builder.source.stackmathqa import OFFICIAL_SOURCE_FILES, StackMathQAAdapter
+
+          revision = 'git:13239ec8c8078bc8dfb43e1383069eb9be000ff7'
+          base = (
+              'https://huggingface.co/datasets/math-ai/StackMathQA/resolve/'
+              '13239ec8c8078bc8dfb43e1383069eb9be000ff7/'
+              'preprocessed/stackexchange-math--1q1a'
+          )
+          selected = []
+          for filename in OFFICIAL_SOURCE_FILES:
+              adapter = StackMathQAAdapter()
+              descriptor = tuple(
+                  adapter.discover(
+                      {
+                          'data_file': f'{base}/{filename}',
+                          'revision': revision,
+                          'license_metadata': {
+                              'declared': 'CC-BY-4.0',
+                              'status': 'UPSTREAM_DECLARED',
+                          },
+                      }
+                  )
+              )[0]
+              chosen = None
+              for record in adapter.acquire(descriptor):
+                  if record.metadata.get('language') != 'en':
+                      continue
+                  if len(record.raw_question) > 1600 or len(record.raw_analysis) > 3200:
+                      continue
+                  normalized = normalize(record)
+                  extraction = extract_source_answer(normalized)
+                  if extraction.final_answer is None:
+                      continue
+                  chosen = record
+                  break
+              if chosen is None:
+                  raise RuntimeError(f'no bounded answer-extractable record found for {filename}')
+              selected.append(chosen)
+              print(
+                  'MICRO_SOURCE '
+                  f"site={chosen.metadata['source_site']} id={chosen.record_id} "
+                  f'qchars={len(chosen.raw_question)} achars={len(chosen.raw_analysis)}',
+                  flush=True,
+              )
+
+          path = Path('/tmp/task15-micro.jsonl')
+          path.write_text(
+              ''.join(
+                  json.dumps(
+                      record.model_dump(mode='json'),
+                      ensure_ascii=False,
+                      sort_keys=True,
+                      separators=(',', ':'),
+                  ) + '\n'
+                  for record in selected
+              ),
+              encoding='utf-8',
+          )
+          assert len(selected) == 4
+          print('MICRO_REAL_RECORDS=4')
+          PY
+
+      - name: Create temporary model-identity config
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          source = Path('config/pilot-5k-frozen.yaml')
+          payload = yaml.safe_load(source.read_text(encoding='utf-8'))
+          payload['config_version'] = 'pilot-5k-copilot-micro-v1'
+          alias = 'github-copilot-gpt-5.4-mini-ci-proxy-v1'
+          payload['providers']['classifier']['model'] = alias
+          payload['providers']['verifier']['model'] = alias
+          Path('/tmp/task15-micro.yaml').write_text(
+              yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+              encoding='utf-8',
+          )
+          print(f'MICRO_CONFIG_MODEL={alias}')
+          PY
+
+      - name: Start CI-only OpenAI-compatible proxy backed by fixed Copilot model
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          cat > /tmp/copilot_proxy.py <<'PY'
+          from __future__ import annotations
+
+          import json
+          import subprocess
+          import time
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from pathlib import Path
+
+          METRICS = Path('/tmp/copilot-proxy-metrics.jsonl')
+          MODEL = 'gpt-5.4-mini'
+
+          class Handler(BaseHTTPRequestHandler):
+              def log_message(self, format: str, *args: object) -> None:
+                  return
+
+              def do_POST(self) -> None:
+                  if self.path != '/chat/completions':
+                      self.send_error(404)
+                      return
+                  length = int(self.headers.get('Content-Length', '0'))
+                  body = json.loads(self.rfile.read(length))
+                  messages = body.get('messages', [])
+                  system = next(
+                      (str(item.get('content', '')) for item in messages if item.get('role') == 'system'),
+                      '',
+                  )
+                  user = next(
+                      (str(item.get('content', '')) for item in messages if item.get('role') == 'user'),
+                      '',
+                  )
+                  prompt = (
+                      'Act only as a deterministic classification endpoint. Do not use tools. '
+                      'Follow the SYSTEM contract exactly. Return ONLY the requested JSON object, '
+                      'with no markdown fences or commentary.\n\nSYSTEM:\n'
+                      + system
+                      + '\n\nUSER:\n'
+                      + user
+                  )
+                  started = time.perf_counter()
+                  proc = subprocess.run(
+                      [
+                          'copilot', '-p', prompt, '-s', '--no-ask-user',
+                          '--model', MODEL,
+                      ],
+                      text=True,
+                      capture_output=True,
+                      timeout=180,
+                      check=False,
+                  )
+                  elapsed = time.perf_counter() - started
+                  metric = {
+                      'elapsed_seconds': round(elapsed, 3),
+                      'returncode': proc.returncode,
+                      'stdout_chars': len(proc.stdout),
+                      'stderr_chars': len(proc.stderr),
+                      'upstream_model': MODEL,
+                      'requested_alias': body.get('model'),
+                  }
+                  with METRICS.open('a', encoding='utf-8') as handle:
+                      handle.write(json.dumps(metric, sort_keys=True) + '\n')
+                  if proc.returncode != 0:
+                      payload = {'error': {'message': 'Copilot CLI request failed'}}
+                      raw = json.dumps(payload).encode()
+                      self.send_response(502)
+                  else:
+                      content = proc.stdout.strip()
+                      payload = {'choices': [{'message': {'content': content}}]}
+                      raw = json.dumps(payload).encode()
+                      self.send_response(200)
+                  self.send_header('Content-Type', 'application/json')
+                  self.send_header('Content-Length', str(len(raw)))
+                  self.end_headers()
+                  self.wfile.write(raw)
+
+          server = ThreadingHTTPServer(('127.0.0.1', 8765), Handler)
+          server.serve_forever()
+          PY
+          python /tmp/copilot_proxy.py >/tmp/copilot-proxy.log 2>&1 &
+          echo $! >/tmp/copilot-proxy.pid
+          sleep 1
+          curl -fsS -o /dev/null http://127.0.0.1:8765/ 2>/dev/null || true
+          echo 'COPILOT_PROXY_STARTED=PASS'
+
+      - name: Execute real four-record production CLI micro run
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OPENAI_COMPATIBLE_BASE_URL: http://127.0.0.1:8765
+        run: |
+          set +e
+          college-builder run \
+            --input /tmp/task15-micro.jsonl \
+            --config /tmp/task15-micro.yaml \
+            --workspace /tmp/task15-micro-workspace \
+            --output /tmp/task15-micro-output \
+            2>&1 | tee /tmp/task15-micro-cli.log
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "MICRO_RUN_EXIT=$status"
+          test "$status" -eq 0
+
+      - name: Inspect run, model-call count, latency and fail-closed results
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          from pathlib import Path
+
+          run_dirs = list((Path('/tmp/task15-micro-workspace') / 'runs').iterdir())
+          assert len(run_dirs) == 1
+          report = json.loads((run_dirs[0] / 'run_report.json').read_text(encoding='utf-8'))
+          metrics_path = Path('/tmp/copilot-proxy-metrics.jsonl')
+          metrics = [json.loads(line) for line in metrics_path.read_text().splitlines() if line.strip()]
+          assert metrics
+          assert all(item['returncode'] == 0 for item in metrics)
+          assert all(item['upstream_model'] == 'gpt-5.4-mini' for item in metrics)
+          usage = report['provider_usage']
+          assert usage['provider_errors'] == 0
+          assert report['raw_count'] == 4
+          summary = {
+              'raw_count': report['raw_count'],
+              'accepted_count': report['accepted_count'],
+              'rejected_count': report['rejected_count'],
+              'reject_reasons': report['reject_reasons'],
+              'provider_call_counts': usage['provider_call_counts'],
+              'pipeline_provider_errors': usage['provider_errors'],
+              'proxy_model_calls': len(metrics),
+              'proxy_total_seconds': round(sum(item['elapsed_seconds'] for item in metrics), 3),
+              'proxy_mean_seconds': round(sum(item['elapsed_seconds'] for item in metrics) / len(metrics), 3),
+              'upstream_model': 'gpt-5.4-mini',
+              'model_alias': 'github-copilot-gpt-5.4-mini-ci-proxy-v1',
+          }
+          Path('/tmp/task15-micro-summary.json').write_text(
+              json.dumps(summary, sort_keys=True, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          print('MICRO_RUN_SUMMARY=' + json.dumps(summary, sort_keys=True))
+          print('MICRO_MODEL_CONTRACT=PASS')
+          PY
+
+      - name: Ensure only summary/report are retained, not raw micro rows
+        shell: bash
+        run: |
+          cp "$(find /tmp/task15-micro-workspace/runs -name run_report.json -print -quit)" /tmp/task15-micro-run-report.json
+          ! grep -Eq 'raw_question|raw_answer|raw_analysis|raw_payload' /tmp/task15-micro-summary.json
+          echo 'MICRO_ARTIFACT_SAFETY=PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: task15-real-model-micro-run-evidence
+          path: |
+            /tmp/task15-micro-summary.json
+            /tmp/task15-micro-run-report.json
+          if-no-files-found: error
+          retention-days: 30
