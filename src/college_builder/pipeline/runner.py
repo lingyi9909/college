@@ -435,13 +435,27 @@ class PipelineRunner:
                 "pipeline_version": self.config.pipeline_version,
             },
         )
-        return self._execute(
-            run_id=run_id,
-            run_dir=run_dir,
-            raw_records=raw_records,
-            output_dir=Path(output_dir),
-            interrupt_after=interrupt_after,
-        )
+        usage_prior = _load_provider_usage(run_dir / "provider_usage.json")
+        usage_baseline = self.processor.provider_usage
+        try:
+            return self._execute(
+                run_id=run_id,
+                run_dir=run_dir,
+                raw_records=raw_records,
+                output_dir=Path(output_dir),
+                interrupt_after=interrupt_after,
+                usage_prior=usage_prior,
+                usage_baseline=usage_baseline,
+            )
+        except PipelineInterrupted:
+            _write_provider_usage(
+                run_dir / "provider_usage.json",
+                _merge_provider_usage(
+                    usage_prior,
+                    _provider_usage_delta(usage_baseline, self.processor.provider_usage),
+                ),
+            )
+            raise
 
     def resume(self, *, run_id: str, output_dir: Path) -> PipelineRunResult:
         run_dir = self.workspace / "runs" / run_id
@@ -469,12 +483,16 @@ class PipelineRunner:
             )
 
         raw_records = self._load_source_cache(source_snapshot_hash)
+        usage_prior = _load_provider_usage(run_dir / "provider_usage.json")
+        usage_baseline = self.processor.provider_usage
         return self._execute(
             run_id=run_id,
             run_dir=run_dir,
             raw_records=raw_records,
             output_dir=destination,
             interrupt_after=None,
+            usage_prior=usage_prior,
+            usage_baseline=usage_baseline,
         )
 
     def _execute(
@@ -485,6 +503,8 @@ class PipelineRunner:
         raw_records: tuple[RawSourceRecord, ...],
         output_dir: Path,
         interrupt_after: RunStage | None,
+        usage_prior: ProviderUsage,
+        usage_baseline: ProviderUsage,
     ) -> PipelineRunResult:
         started = time.perf_counter()
         state = RunStateStore(run_dir / "state.sqlite3")
@@ -551,12 +571,22 @@ class PipelineRunner:
                 or classification_outcome.classification is None
             ):
                 reason = classification_outcome.reject_reason or "UNIVERSITY_LEVEL_UNCERTAIN"
+                university_label = (
+                    _decision_label(classification_outcome.evidence[0])
+                    if classification_outcome.evidence
+                    else None
+                )
+                if university_label == "NON_UNIVERSITY_STEM":
+                    audits[raw.record_id]["stem"] = True
+                    audits[raw.record_id]["university"] = False
                 self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)
                 continue
             classifications[raw.record_id] = classification_outcome.classification
             fp = self._classification_fingerprint(candidate)
             if state.current_stage(run_id, raw.record_id) is RunStage.NORMALIZED:
                 state.advance(run_id, raw.record_id, RunStage.CLASSIFIED, fp)
+            audits[raw.record_id]["stem"] = True
+            audits[raw.record_id]["university"] = True
             audits[raw.record_id]["university_stem"] = True
             audits[raw.record_id]["problem"] = True
             audits[raw.record_id]["subject"] = (
@@ -758,10 +788,15 @@ class PipelineRunner:
             output_dir,
         )
         audit_rows = tuple(RecordAudit.model_validate(audits[row.record_id]) for row in raw_records)
+        provider_usage = _merge_provider_usage(
+            usage_prior,
+            _provider_usage_delta(usage_baseline, self.processor.provider_usage),
+        )
+        _write_provider_usage(run_dir / "provider_usage.json", provider_usage)
         report = build_pilot_report(
             run_id=run_id,
             audits=audit_rows,
-            provider_usage=self.processor.provider_usage,
+            provider_usage=provider_usage,
             wall_time_seconds=time.perf_counter() - started,
         )
         report_path = write_pilot_report(report, run_dir / "run_report.json")
@@ -1163,6 +1198,59 @@ class PipelineRunner:
         )
 
 
+def _load_provider_usage(path: Path) -> ProviderUsage:
+    if not path.is_file():
+        return ProviderUsage()
+    return ProviderUsage.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def _write_provider_usage(path: Path, usage: ProviderUsage) -> None:
+    _atomic_write_text(
+        path,
+        json.dumps(
+            usage.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+    )
+
+
+def _provider_usage_delta(before: ProviderUsage, after: ProviderUsage) -> ProviderUsage:
+    keys = set(before.provider_call_counts) | set(after.provider_call_counts)
+    calls = {
+        key: after.provider_call_counts.get(key, 0) - before.provider_call_counts.get(key, 0)
+        for key in keys
+        if after.provider_call_counts.get(key, 0) > before.provider_call_counts.get(key, 0)
+    }
+    return ProviderUsage(
+        provider_call_counts=calls,
+        cache_hits=max(0, after.cache_hits - before.cache_hits),
+        cache_misses=max(0, after.cache_misses - before.cache_misses),
+        latency_seconds=max(0.0, after.latency_seconds - before.latency_seconds),
+        tokens=max(0, after.tokens - before.tokens),
+        estimated_cost_usd=max(0.0, after.estimated_cost_usd - before.estimated_cost_usd),
+        fallback_count=max(0, after.fallback_count - before.fallback_count),
+        provider_errors=max(0, after.provider_errors - before.provider_errors),
+    )
+
+
+def _merge_provider_usage(left: ProviderUsage, right: ProviderUsage) -> ProviderUsage:
+    calls = Counter(left.provider_call_counts)
+    calls.update(right.provider_call_counts)
+    return ProviderUsage(
+        provider_call_counts=dict(calls),
+        cache_hits=left.cache_hits + right.cache_hits,
+        cache_misses=left.cache_misses + right.cache_misses,
+        latency_seconds=left.latency_seconds + right.latency_seconds,
+        tokens=left.tokens + right.tokens,
+        estimated_cost_usd=left.estimated_cost_usd + right.estimated_cost_usd,
+        fallback_count=left.fallback_count + right.fallback_count,
+        provider_errors=left.provider_errors + right.provider_errors,
+    )
+
+
 def _source_snapshot_hash(descriptors: tuple[SourceDescriptor, ...]) -> str:
     values = [descriptor.model_dump(mode="json") for descriptor in descriptors]
     values.sort(key=lambda value: json.dumps(value, sort_keys=True, separators=(",", ":")))
@@ -1216,6 +1304,8 @@ def _audit_facts(raw: RawSourceRecord) -> dict[str, Any]:
         "source_dataset": raw.source_dataset,
         "subject": "UNKNOWN",
         "normalized": False,
+        "stem": False,
+        "university": False,
         "university_stem": False,
         "problem": False,
         "answer_valid": False,

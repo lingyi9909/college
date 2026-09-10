@@ -90,12 +90,9 @@ def build_pilot_report(
     funnel = {
         "raw": raw_count,
         "normalized": sum(row.normalized for row in rows),
-        "stem": sum(
-            row.stem if row.stem is not None else row.university_stem for row in rows
-        ),
+        "stem": sum(row.stem if row.stem is not None else row.university_stem for row in rows),
         "university": sum(
-            row.university if row.university is not None else row.university_stem
-            for row in rows
+            row.university if row.university is not None else row.university_stem for row in rows
         ),
         "problem": sum(row.problem for row in rows),
         "answer_valid": sum(row.answer_valid for row in rows),
