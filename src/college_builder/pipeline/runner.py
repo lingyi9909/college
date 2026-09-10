@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
@@ -1459,7 +1460,12 @@ def _merge_provider_usage(left: ProviderUsage, right: ProviderUsage) -> Provider
 
 def _has_trusted_source_revision(descriptor: SourceDescriptor) -> bool:
     revision = descriptor.source_revision
-    return isinstance(revision, str) and bool(revision.strip())
+    if not isinstance(revision, str):
+        return False
+    return bool(
+        re.fullmatch(r"sha256:[0-9a-fA-F]{64}", revision)
+        or re.fullmatch(r"git:(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", revision)
+    )
 
 
 def _source_snapshot_hash(descriptors: tuple[SourceDescriptor, ...]) -> str:

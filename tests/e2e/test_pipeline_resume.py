@@ -23,7 +23,11 @@ from college_builder.storage.state import RunStage
 
 class CountingAdapter:
     def __init__(
-        self, records: tuple[RawSourceRecord, ...], *, revision: str | None = "fixture-v1"
+        self,
+        records: tuple[RawSourceRecord, ...],
+        *,
+        revision: str
+        | None = "sha256:1111111111111111111111111111111111111111111111111111111111111111",
     ) -> None:
         self.records = records
         self.revision = revision
