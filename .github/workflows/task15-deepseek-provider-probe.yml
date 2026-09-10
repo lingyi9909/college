@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 83419041138b97c9ce0e3d1fd180e247b429c65b
+          ref: cf49a9815f14f1b1b6619fa4c5e8018e133bd5b6
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -54,7 +54,12 @@ jobs:
               allowed_labels=('PASS',),
           )
           for model in models:
-              provider = OpenAICompatibleStructuredModelProvider(model=model)
+              provider = OpenAICompatibleStructuredModelProvider(
+                  model=model,
+                  timeout_seconds=90.0,
+                  max_attempts=3,
+                  retry_backoff_seconds=1.0,
+              )
               decision = provider.classify(request)
               assert decision.label == 'PASS'
               results.append({
@@ -115,28 +120,12 @@ jobs:
           assert len(selected) == 4
           PY
 
-      - name: Create temporary two-model Task 15 config
-        shell: bash
-        run: |
-          python - <<'PY'
-          import yaml
-          from pathlib import Path
-          payload = yaml.safe_load(Path('config/pilot-5k-frozen.yaml').read_text())
-          payload['config_version'] = 'pilot-5k-deepseek-micro-v1'
-          payload['providers']['classifier']['model'] = 'deepseek-flash'
-          payload['providers']['verifier']['model'] = 'deepseek-v4-pro'
-          Path('/tmp/task15-micro.yaml').write_text(
-              yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding='utf-8')
-          print('TASK15_CLASSIFIER_MODEL=deepseek-flash')
-          print('TASK15_VERIFIER_MODEL=deepseek-v4-pro')
-          PY
-
-      - name: Execute production pipeline on four real strata
+      - name: Execute production pipeline on four real strata with formal frozen config
         shell: bash
         run: |
           college-builder run \
             --input /tmp/task15-micro.jsonl \
-            --config /tmp/task15-micro.yaml \
+            --config config/pilot-5k-frozen.yaml \
             --workspace /tmp/task15-micro-workspace \
             --output /tmp/task15-micro-output
 
@@ -192,6 +181,7 @@ jobs:
           report_path = run_dirs[0] / 'run_report.json'
           report = json.loads(report_path.read_text())
           summary = {
+              'feature_sha': 'cf49a9815f14f1b1b6619fa4c5e8018e133bd5b6',
               'raw_count': report['raw_count'],
               'accepted_count': report['accepted_count'],
               'rejected_count': report['rejected_count'],
@@ -211,9 +201,8 @@ jobs:
               json.dumps(report, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8')
           print('TASK15_DEEPSEEK_MICRO=' + json.dumps(summary, sort_keys=True))
           assert summary['raw_count'] == 4
-          if summary['pipeline_provider_errors'] != 0:
-              print(f"TASK15_PROVIDER_ERRORS={summary['pipeline_provider_errors']}")
-              raise SystemExit(12)
+          assert summary['pipeline_provider_errors'] == 0
+          assert 'VERIFIER_NOT_INDEPENDENT' not in summary['reject_reason_counts']
           print('TASK15_PRODUCTION_MICRO=PASS')
           PY
 
