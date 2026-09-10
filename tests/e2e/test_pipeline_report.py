@@ -121,6 +121,38 @@ def test_pilot_report_contains_full_funnel_splits_rejects_and_cost_fields() -> N
     assert report.acceptance_rate == 0.25
 
 
+def test_pilot_report_distinguishes_stem_from_university() -> None:
+    audits = (
+        RecordAudit(
+            record_id="university",
+            source_dataset="source-a",
+            subject="MATHEMATICS",
+            normalized=True,
+            stem=True,
+            university=True,
+            university_stem=True,
+        ),
+        RecordAudit(
+            record_id="non-university-stem",
+            source_dataset="source-a",
+            subject="MATHEMATICS",
+            normalized=True,
+            stem=True,
+            university=False,
+            university_stem=False,
+            reject_reason="NON_UNIVERSITY_STEM",
+        ),
+    )
+    report = build_pilot_report(
+        run_id="run-stem-split",
+        audits=audits,
+        provider_usage=ProviderUsage(),
+        wall_time_seconds=0.0,
+    )
+    assert report.funnel["stem"] == 2
+    assert report.funnel["university"] == 1
+
+
 def test_cli_exposes_run_resume_report_and_config_validate(tmp_path: Path) -> None:
     runner = CliRunner()
     help_result = runner.invoke(app, ["--help"])
