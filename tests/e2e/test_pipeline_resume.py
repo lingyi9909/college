@@ -23,7 +23,7 @@ from college_builder.storage.state import RunStage
 
 class CountingAdapter:
     def __init__(
-        self, records: tuple[RawSourceRecord, ...], *, revision: str = "fixture-v1"
+        self, records: tuple[RawSourceRecord, ...], *, revision: str | None = "fixture-v1"
     ) -> None:
         self.records = records
         self.revision = revision
@@ -227,6 +227,33 @@ def _processor(
     )
 
 
+def _runner(
+    *,
+    config: PipelineConfig,
+    workspace: Path,
+    primary: RuleProvider | None = None,
+    verifier: RuleProvider | None = None,
+) -> PipelineRunner:
+    primary = primary or RuleProvider(provider="fixture-primary", model="primary-v1")
+    verifier = verifier or RuleProvider(provider="fixture-verifier", model="verifier-v1")
+    return PipelineRunner(
+        config=config,
+        workspace=workspace,
+        processor=_processor(
+            config=config,
+            workspace=workspace,
+            primary=primary,
+            verifier=verifier,
+        ),
+    )
+
+
+def _single_rejection(run_dir: Path) -> dict[str, object]:
+    paths = list((run_dir / "rejected").glob("*.json"))
+    assert len(paths) == 1
+    return json.loads(paths[0].read_text(encoding="utf-8"))
+
+
 def test_resume_reuses_acquisition_normalization_and_cached_decisions(tmp_path: Path) -> None:
     records = _twenty_records()
     adapter = CountingAdapter(records)
@@ -389,3 +416,163 @@ def test_resume_report_preserves_usage_from_interrupted_attempt(tmp_path: Path) 
     expected = first_calls + second_calls
 
     assert report["provider_call_counts"] == dict(sorted(expected.items()))
+
+
+def test_problem_reject_keeps_reliable_subject_from_source_metadata(tmp_path: Path) -> None:
+    config = _config()
+    workspace = tmp_path / "workspace"
+    result = _runner(config=config, workspace=workspace).run(
+        adapter=CountingAdapter((_record(11, "NONPROBLEM"),)),
+        source_config={},
+        output_dir=tmp_path / "output",
+    )
+    report = json.loads(result.report_path.read_text(encoding="utf-8"))
+
+    assert report["subject_distribution"]["MATHEMATICS"]["raw"] == 1
+    assert "UNKNOWN" not in report["subject_distribution"]
+
+
+def test_revisionless_source_content_change_creates_new_snapshot_and_run(tmp_path: Path) -> None:
+    config = _config()
+    workspace = tmp_path / "workspace"
+    first_adapter = CountingAdapter(
+        (_record(1, "VALID", question_override="Q1: Calculate 1 + 1"),),
+        revision=None,
+    )
+    first = _runner(config=config, workspace=workspace).run(
+        adapter=first_adapter,
+        source_config={},
+        output_dir=tmp_path / "first",
+    )
+
+    second_adapter = CountingAdapter(
+        (_record(1, "VALID", question_override="Q2: Calculate 2 + 2"),),
+        revision=None,
+    )
+    second = _runner(config=config, workspace=workspace).run(
+        adapter=second_adapter,
+        source_config={},
+        output_dir=tmp_path / "second",
+    )
+    output = json.loads(second.output_path.read_text(encoding="utf-8").splitlines()[0])
+
+    assert first_adapter.acquire_calls == 1
+    assert second_adapter.acquire_calls == 1
+    assert first.run_id != second.run_id
+    assert "Q2" in output["text_question"]
+    assert "Q1" not in output["text_question"]
+
+
+def test_revisionless_identical_content_keeps_identity_and_reuses_downstream(tmp_path: Path) -> None:
+    config = _config()
+    workspace = tmp_path / "workspace"
+    records = (_record(1, "VALID"),)
+    first_adapter = CountingAdapter(records, revision=None)
+    first = _runner(config=config, workspace=workspace).run(
+        adapter=first_adapter,
+        source_config={},
+        output_dir=tmp_path / "first",
+    )
+
+    second_primary = RuleProvider(provider="fixture-primary", model="primary-v1")
+    second_verifier = RuleProvider(provider="fixture-verifier", model="verifier-v1")
+    second_adapter = CountingAdapter(records, revision=None)
+    second = _runner(
+        config=config,
+        workspace=workspace,
+        primary=second_primary,
+        verifier=second_verifier,
+    ).run(
+        adapter=second_adapter,
+        source_config={},
+        output_dir=tmp_path / "second",
+    )
+
+    assert first.run_id == second.run_id
+    assert first_adapter.acquire_calls == 1
+    assert second_adapter.acquire_calls == 1
+    assert sum(second_primary.calls.values()) == 0
+    assert sum(second_verifier.calls.values()) == 0
+
+
+def test_integrity_reject_persists_full_evidence_and_resume_uses_it(tmp_path: Path) -> None:
+    config = _config()
+    workspace = tmp_path / "workspace"
+    corrupt = _record(1, "VALID").model_copy(update={"raw_sha256": "0" * 64})
+    first = _runner(config=config, workspace=workspace).run(
+        adapter=CountingAdapter((corrupt,)),
+        source_config={},
+        output_dir=tmp_path / "first",
+    )
+    rejection = _single_rejection(first.run_dir)
+
+    assert rejection["source_record_id"] == corrupt.record_id
+    assert rejection["stage"] == "integrity"
+    assert rejection["reason_code"] == "SOURCE_CORRUPTED"
+    assert rejection["pipeline_version"] == config.pipeline_version
+    assert rejection["config_version"] == config.config_version
+    assert rejection["prompt_version"] == "not_applicable"
+    assert rejection["provider"] == "deterministic"
+    assert rejection["model"] == "integrity_v1"
+    assert rejection["details"]
+    evidence = rejection["evidence"]
+    assert isinstance(evidence, list)
+    assert evidence[0]["gate_name"] == "gate_0_integrity_provenance"
+    assert evidence[0]["reason_code"] == "SOURCE_CORRUPTED"
+    assert evidence[0]["evidence_payload"]["expected_raw_sha256"] == "0" * 64
+
+    for audit_path in (first.run_dir / "audits").glob("*.json"):
+        audit_path.unlink()
+
+    resumed = _runner(config=config, workspace=workspace).resume(
+        run_id=first.run_id,
+        output_dir=tmp_path / "resumed",
+    )
+    resumed_report = json.loads(resumed.report_path.read_text(encoding="utf-8"))
+    assert resumed_report["reject_reason_counts"] == {"SOURCE_CORRUPTED": 1}
+    assert _single_rejection(resumed.run_dir) == rejection
+
+
+def test_model_and_duplicate_rejects_persist_identity_and_context(tmp_path: Path) -> None:
+    config = _config()
+
+    model_workspace = tmp_path / "model-workspace"
+    model_result = _runner(config=config, workspace=model_workspace).run(
+        adapter=CountingAdapter((_record(11, "NONPROBLEM"),)),
+        source_config={},
+        output_dir=tmp_path / "model-output",
+    )
+    model_rejection = _single_rejection(model_result.run_dir)
+    assert model_rejection["stage"] == "classification"
+    assert model_rejection["reason_code"] == "NOT_PROBLEM"
+    assert model_rejection["provider"] == "fixture-primary"
+    assert model_rejection["model"] == "primary-v1"
+    assert model_rejection["prompt_version"] == "v1"
+    assert model_rejection["config_version"] == config.config_version
+    assert any(
+        item["gate_name"] == "gate_2_problem" and item["reason_code"] == "NOT_PROBLEM"
+        for item in model_rejection["evidence"]
+    )
+
+    duplicate_workspace = tmp_path / "duplicate-workspace"
+    duplicate_question = "DUPLICATE REVIEW: Calculate 2 + 2"
+    duplicate_result = _runner(config=config, workspace=duplicate_workspace).run(
+        adapter=CountingAdapter(
+            (
+                _record(1, "VALID", question_override=duplicate_question),
+                _record(2, "VALID", question_override=duplicate_question),
+            )
+        ),
+        source_config={},
+        output_dir=tmp_path / "duplicate-output",
+    )
+    rejection_paths = list((duplicate_result.run_dir / "rejected").glob("*.json"))
+    assert len(rejection_paths) == 1
+    duplicate_rejection = json.loads(rejection_paths[0].read_text(encoding="utf-8"))
+    assert duplicate_rejection["stage"] == "early_dedup"
+    assert duplicate_rejection["reason_code"] == "DUPLICATE"
+    assert duplicate_rejection["provider"] == "deterministic"
+    assert duplicate_rejection["model"] == "pipeline_runner_v1"
+    assert duplicate_rejection["prompt_version"] == "not_applicable"
+    assert duplicate_rejection["details"]
+    assert duplicate_rejection["evidence"][0]["verdict"] == "REJECT"
