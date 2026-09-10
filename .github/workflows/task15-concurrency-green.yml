@@ -119,6 +119,11 @@ jobs:
           path.write_text(text, encoding='utf-8')
           PY
 
+      - name: Normalize changed-file formatting
+        run: |
+          ruff check src/college_builder/pipeline/runner.py tests/e2e/test_task15_pipeline_concurrency.py --fix
+          ruff format src/college_builder/pipeline/runner.py tests/e2e/test_task15_pipeline_concurrency.py
+
       - name: Targeted concurrency and resume regressions
         run: pytest -q tests/e2e/test_task15_pipeline_concurrency.py tests/e2e/test_pipeline_resume.py
       - name: Full pytest
