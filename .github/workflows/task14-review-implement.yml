@@ -1,0 +1,151 @@
+name: Task 14 Review Implement
+on:
+  push:
+    branches:
+      - ci/task14-review-implement
+permissions:
+  contents: write
+jobs:
+  implement:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/task14-review-blockers
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Add deterministic language rejection regression
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/e2e/test_pipeline_resume.py')
+          text = path.read_text(encoding='utf-8')
+          marker = 'def test_language_reject_persists_deterministic_context'
+          if marker not in text:
+              text += '''\n\ndef test_language_reject_persists_deterministic_context(tmp_path: Path) -> None:\n    config = _config()\n    workspace = tmp_path / "language-workspace"\n    payload = _record(1, "VALID").model_dump(mode="json")\n    metadata = payload["metadata"]\n    assert isinstance(metadata, dict)\n    metadata["language"] = "EN"\n    bad_language = RawSourceRecord.model_validate(payload)\n\n    result = _runner(config=config, workspace=workspace).run(\n        adapter=CountingAdapter((bad_language,)),\n        source_config={},\n        output_dir=tmp_path / "language-output",\n    )\n    rejection = _single_rejection(result.run_dir)\n\n    assert rejection["stage"] == "final_validation"\n    assert rejection["reason_code"] == "LANGUAGE_UNRESOLVED"\n    assert rejection["provider"] == "deterministic"\n    assert rejection["model"] == "pipeline_runner_v1"\n    assert rejection["prompt_version"] == "not_applicable"\n    assert rejection["details"]\n    assert rejection["evidence"][0]["reason_code"] == "LANGUAGE_UNRESOLVED"\n'''
+              path.write_text(text, encoding='utf-8')
+          PY
+      - name: Prove language rejection is RED before implementation
+        shell: bash
+        run: |
+          set +e
+          pytest tests/e2e/test_pipeline_resume.py::test_language_reject_persists_deterministic_context -q
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            echo 'Expected language rejection regression to be RED before production fix'
+            exit 1
+          fi
+          exit 0
+      - name: Apply minimal Task 14 production fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/college_builder/pipeline/runner.py')
+          text = path.read_text(encoding='utf-8')
+
+          def replace(old: str, new: str) -> None:
+              global text
+              if old not in text:
+                  raise SystemExit(f'missing patch anchor:\n{old[:240]}')
+              text = text.replace(old, new, 1)
+
+          replace(
+              'import time\nfrom collections import Counter\n',
+              'import time\nfrom collections import Counter\nfrom datetime import UTC, datetime\n',
+          )
+          replace(
+              'from typing import Any, cast\n\nfrom college_builder.config import PipelineConfig\n',
+              'from typing import Any, cast\n\nfrom pydantic import BaseModel, ConfigDict, Field\n\nfrom college_builder.config import PipelineConfig\n',
+          )
+          replace(
+              '''@dataclass(frozen=True, slots=True)\nclass PipelineRunResult:\n    run_id: str\n    run_dir: Path\n    output_path: Path\n    report_path: Path\n    accepted_count: int\n    rejected_count: int\n\n\nclass PipelineInterrupted(RuntimeError):\n''',
+              '''@dataclass(frozen=True, slots=True)\nclass PipelineRunResult:\n    run_id: str\n    run_dir: Path\n    output_path: Path\n    report_path: Path\n    accepted_count: int\n    rejected_count: int\n\n\nclass RejectedRecord(BaseModel):\n    """Durable terminal rejection fact used by resume and reporting."""\n\n    model_config = ConfigDict(frozen=True, extra="forbid")\n\n    source_record_id: str = Field(min_length=1)\n    stage: str = Field(min_length=1)\n    reason_code: str = Field(min_length=1)\n    details: dict[str, JsonValue] = Field(default_factory=dict)\n    evidence: tuple[GateResultEvidence, ...] = ()\n    pipeline_version: str = Field(min_length=1)\n    config_version: str = Field(min_length=1)\n    prompt_version: str = Field(min_length=1)\n    provider: str = Field(min_length=1)\n    model: str = Field(min_length=1)\n\n\nclass PipelineInterrupted(RuntimeError):\n''',
+          )
+          replace(
+              '''        source_snapshot_hash = _source_snapshot_hash(descriptors)\n        raw_records = self._load_or_acquire(adapter, descriptors, source_snapshot_hash)\n''',
+              '''        source_snapshot_hash, raw_records = self._resolve_source_snapshot(\n            adapter, descriptors\n        )\n''',
+          )
+          replace(
+              '''            current = state.current_stage(run_id, raw.record_id)\n            saved_audit = self._load_audit(run_dir, raw.record_id)\n            audits[raw.record_id] = saved_audit or _audit_facts(raw)\n            if current is RunStage.REJECTED:\n                rejected.add(raw.record_id)\n                continue\n            if current is RunStage.ACCEPTED:\n''',
+              '''            current = state.current_stage(run_id, raw.record_id)\n            saved_audit = self._load_audit(run_dir, raw.record_id)\n            audits[raw.record_id] = saved_audit or _audit_facts(raw)\n            saved_rejection = self._load_rejection(run_dir, raw.record_id)\n            if saved_rejection is not None:\n                rejection_fp = _hash_json(saved_rejection.model_dump(mode="json"))\n                if current is not RunStage.REJECTED:\n                    state.advance(run_id, raw.record_id, RunStage.REJECTED, rejection_fp)\n                rejected.add(raw.record_id)\n                audits[raw.record_id]["reject_reason"] = saved_rejection.reason_code\n                audits[raw.record_id]["accepted"] = False\n                self._save_audit(run_dir, raw.record_id, audits[raw.record_id])\n                continue\n            if current is RunStage.REJECTED:\n                raise RuntimeError(\n                    f"rejected record {raw.record_id} is missing durable rejection evidence"\n                )\n            if current is RunStage.ACCEPTED:\n''',
+          )
+          replace(
+              '''                    integrity.reason_code,\n                    rejected,\n                    audits,\n                )\n''',
+              '''                    integrity.reason_code,\n                    rejected,\n                    audits,\n                    gate_evidence=(integrity,),\n                )\n''',
+          )
+          replace(
+              '''                university_label = (\n                    _decision_label(classification_outcome.evidence[0])\n                    if classification_outcome.evidence\n                    else None\n                )\n                if university_label == "NON_UNIVERSITY_STEM":\n                    audits[raw.record_id]["stem"] = True\n                    audits[raw.record_id]["university"] = False\n                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)\n''',
+              '''                university_evidence = (\n                    classification_outcome.evidence[0]\n                    if classification_outcome.evidence\n                    else None\n                )\n                university_label = (\n                    _decision_label(university_evidence)\n                    if university_evidence is not None\n                    else None\n                )\n                if university_evidence is not None and university_evidence.verdict is not GateVerdict.REJECT:\n                    audits[raw.record_id]["stem"] = True\n                    audits[raw.record_id]["university"] = True\n                    audits[raw.record_id]["university_stem"] = True\n                elif university_label == "NON_UNIVERSITY_STEM":\n                    audits[raw.record_id]["stem"] = True\n                    audits[raw.record_id]["university"] = False\n                self._mark_rejected(\n                    state,\n                    run_id,\n                    run_dir,\n                    raw.record_id,\n                    reason,\n                    rejected,\n                    audits,\n                    gate_evidence=classification_outcome.evidence,\n                )\n''',
+          )
+          replace(
+              '''                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)\n                continue\n            answers[raw.record_id] = answer_outcome.answer\n''',
+              '''                self._mark_rejected(\n                    state,\n                    run_id,\n                    run_dir,\n                    raw.record_id,\n                    reason,\n                    rejected,\n                    audits,\n                    gate_evidence=answer_outcome.evidence,\n                )\n                continue\n            answers[raw.record_id] = answer_outcome.answer\n''',
+          )
+          replace(
+              '''                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)\n                continue\n            analyses[raw.record_id] = analysis_outcome.analysis\n''',
+              '''                self._mark_rejected(\n                    state,\n                    run_id,\n                    run_dir,\n                    raw.record_id,\n                    reason,\n                    rejected,\n                    audits,\n                    gate_evidence=analysis_outcome.evidence,\n                )\n                continue\n            analyses[raw.record_id] = analysis_outcome.analysis\n''',
+          )
+          replace(
+              '''                self._mark_rejected(\n                    state, run_id, run_dir, raw.record_id, "DUPLICATE", rejected, audits\n                )\n                continue\n            fp = _hash_json({"exact_hash": ExactDeduper().fingerprint(candidate)})\n''',
+              '''                self._mark_rejected(\n                    state,\n                    run_id,\n                    run_dir,\n                    raw.record_id,\n                    "DUPLICATE",\n                    rejected,\n                    audits,\n                    details={\n                        "record_id": raw.record_id,\n                        "exact_hash": ExactDeduper().fingerprint(candidate),\n                    },\n                )\n                continue\n            fp = _hash_json({"exact_hash": ExactDeduper().fingerprint(candidate)})\n''',
+          )
+          replace(
+              '''                    verification_outcome.reject_reason,\n                    rejected,\n                    audits,\n                )\n''',
+              '''                    verification_outcome.reject_reason,\n                    rejected,\n                    audits,\n                    gate_evidence=verification_outcome.evidence,\n                )\n''',
+          )
+          replace(
+              '''                self._mark_rejected(\n                    state, run_id, run_dir, raw.record_id, "DUPLICATE", rejected, audits\n                )\n                continue\n            current = state.current_stage(run_id, raw.record_id)\n''',
+              '''                self._mark_rejected(\n                    state,\n                    run_id,\n                    run_dir,\n                    raw.record_id,\n                    "DUPLICATE",\n                    rejected,\n                    audits,\n                    details={\n                        "record_id": raw.record_id,\n                        "exact_hash": ExactDeduper().fingerprint(candidate),\n                    },\n                )\n                continue\n            current = state.current_stage(run_id, raw.record_id)\n''',
+          )
+          replace(
+              '''                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)\n                continue\n\n            accepted_fp = _hash_json({"ir": ir.model_dump(mode="json")})\n''',
+              '''                self._mark_rejected(\n                    state,\n                    run_id,\n                    run_dir,\n                    raw.record_id,\n                    reason,\n                    rejected,\n                    audits,\n                    details={\n                        "record_id": raw.record_id,\n                        "validation_error": str(exc),\n                    },\n                )\n                continue\n\n            accepted_fp = _hash_json({"ir": ir.model_dump(mode="json")})\n''',
+          )
+          replace(
+              '''        audit_rows = tuple(RecordAudit.model_validate(audits[row.record_id]) for row in raw_records)\n        provider_usage = _merge_provider_usage(\n''',
+              '''        for record_id in rejected:\n            rejection = self._load_rejection(run_dir, record_id)\n            if rejection is None:\n                raise RuntimeError(\n                    f"rejected record {record_id} is missing durable rejection evidence"\n                )\n            audits[record_id]["reject_reason"] = rejection.reason_code\n            audits[record_id]["accepted"] = False\n        audit_rows = tuple(RecordAudit.model_validate(audits[row.record_id]) for row in raw_records)\n        provider_usage = _merge_provider_usage(\n''',
+          )
+          replace(
+              '''    def _load_or_acquire(\n        self,\n        adapter: SourceAdapter,\n        descriptors: tuple[SourceDescriptor, ...],\n        source_snapshot_hash: str,\n    ) -> tuple[RawSourceRecord, ...]:\n        cache_path = self._source_cache_path(source_snapshot_hash)\n        if cache_path.is_file():\n            return self._load_source_cache(source_snapshot_hash)\n        records: list[RawSourceRecord] = []\n        seen: set[str] = set()\n        for descriptor in descriptors:\n            for record in adapter.acquire(descriptor):\n                if record.record_id in seen:\n                    raise ValueError(f"duplicate acquired record_id: {record.record_id}")\n                seen.add(record.record_id)\n                records.append(record)\n        if not records:\n            raise ValueError("source acquisition returned no records")\n        cache_path.parent.mkdir(parents=True, exist_ok=True)\n        payload = "".join(\n            json.dumps(\n                record.model_dump(mode="json"),\n                ensure_ascii=False,\n                sort_keys=True,\n                separators=(",", ":"),\n            )\n            + "\\n"\n            for record in records\n        )\n        _atomic_write_text(cache_path, payload)\n        return tuple(records)\n''',
+              '''    def _resolve_source_snapshot(\n        self,\n        adapter: SourceAdapter,\n        descriptors: tuple[SourceDescriptor, ...],\n    ) -> tuple[str, tuple[RawSourceRecord, ...]]:\n        if all(_has_trusted_source_revision(descriptor) for descriptor in descriptors):\n            source_snapshot_hash = _source_snapshot_hash(descriptors)\n            return (\n                source_snapshot_hash,\n                self._load_or_acquire(adapter, descriptors, source_snapshot_hash),\n            )\n\n        records = self._acquire_records(adapter, descriptors)\n        source_snapshot_hash = _source_content_snapshot_hash(descriptors, records)\n        self._store_source_snapshot(source_snapshot_hash, records)\n        return source_snapshot_hash, records\n\n    def _load_or_acquire(\n        self,\n        adapter: SourceAdapter,\n        descriptors: tuple[SourceDescriptor, ...],\n        source_snapshot_hash: str,\n    ) -> tuple[RawSourceRecord, ...]:\n        cache_path = self._source_cache_path(source_snapshot_hash)\n        if cache_path.is_file():\n            return self._load_source_cache(source_snapshot_hash)\n        records = self._acquire_records(adapter, descriptors)\n        self._store_source_snapshot(source_snapshot_hash, records)\n        return records\n\n    def _acquire_records(\n        self,\n        adapter: SourceAdapter,\n        descriptors: tuple[SourceDescriptor, ...],\n    ) -> tuple[RawSourceRecord, ...]:\n        records: list[RawSourceRecord] = []\n        seen: set[str] = set()\n        for descriptor in descriptors:\n            for record in adapter.acquire(descriptor):\n                if record.record_id in seen:\n                    raise ValueError(f"duplicate acquired record_id: {record.record_id}")\n                seen.add(record.record_id)\n                records.append(record)\n        if not records:\n            raise ValueError("source acquisition returned no records")\n        return tuple(records)\n\n    def _store_source_snapshot(\n        self, source_snapshot_hash: str, records: tuple[RawSourceRecord, ...]\n    ) -> None:\n        cache_path = self._source_cache_path(source_snapshot_hash)\n        payload = _serialize_source_records(records)\n        if cache_path.is_file():\n            if cache_path.read_text(encoding="utf-8") != payload:\n                raise RuntimeError("source snapshot hash collision or cache corruption")\n            return\n        cache_path.parent.mkdir(parents=True, exist_ok=True)\n        _atomic_write_text(cache_path, payload)\n''',
+          )
+          replace(
+              '''    def _mark_rejected(\n        self,\n        state: RunStateStore,\n        run_id: str,\n        run_dir: Path,\n        record_id: str,\n        reason: str,\n        rejected: set[str],\n        audits: dict[str, dict[str, Any]],\n    ) -> None:\n        current = state.current_stage(run_id, record_id)\n        if current is not RunStage.REJECTED:\n            state.advance(run_id, record_id, RunStage.REJECTED, _hash_json({"reason": reason}))\n        rejected.add(record_id)\n        audits[record_id]["reject_reason"] = reason\n        audits[record_id]["accepted"] = False\n        self._save_audit(run_dir, record_id, audits[record_id])\n\n    def _stage_artifact_path''',
+              '''    def _mark_rejected(\n        self,\n        state: RunStateStore,\n        run_id: str,\n        run_dir: Path,\n        record_id: str,\n        reason: str,\n        rejected: set[str],\n        audits: dict[str, dict[str, Any]],\n        *,\n        gate_evidence: tuple[GateResultEvidence, ...] = (),\n        details: dict[str, JsonValue] | None = None,\n    ) -> None:\n        current = state.current_stage(run_id, record_id)\n        if current is None or current is RunStage.REJECTED:\n            raise RuntimeError("rejection requires a completed non-terminal pipeline stage")\n        stage = _reject_stage(current)\n        identity_evidence = _reject_identity_evidence(gate_evidence)\n        resolved_details = dict(details or {})\n        if not resolved_details and identity_evidence is not None:\n            resolved_details = dict(identity_evidence.evidence_payload)\n        if not resolved_details:\n            resolved_details = {\n                "record_id": record_id,\n                "state_before_reject": current.value,\n                "reason_code": reason,\n            }\n        if identity_evidence is None:\n            identity_evidence = GateResultEvidence(\n                gate_name=f"pipeline_{stage}",\n                verdict=GateVerdict.REJECT,\n                score=0.0,\n                provider="deterministic",\n                model="pipeline_runner_v1",\n                prompt_version="not_applicable",\n                config_version=self.config.config_version,\n                reason_code=reason,\n                evidence_payload=resolved_details,\n                timestamp=datetime.now(UTC),\n            )\n            gate_evidence = (identity_evidence,)\n        rejection = RejectedRecord(\n            source_record_id=record_id,\n            stage=stage,\n            reason_code=reason,\n            details=resolved_details,\n            evidence=gate_evidence,\n            pipeline_version=self.config.pipeline_version,\n            config_version=self.config.config_version,\n            prompt_version=identity_evidence.prompt_version,\n            provider=identity_evidence.provider,\n            model=identity_evidence.model,\n        )\n        self._write_rejection(run_dir, record_id, rejection)\n        rejection_fp = _hash_json(rejection.model_dump(mode="json"))\n        state.advance(run_id, record_id, RunStage.REJECTED, rejection_fp)\n        rejected.add(record_id)\n        audits[record_id]["reject_reason"] = rejection.reason_code\n        audits[record_id]["accepted"] = False\n        self._save_audit(run_dir, record_id, audits[record_id])\n\n    def _rejection_path(self, run_dir: Path, record_id: str) -> Path:\n        safe_id = hashlib.sha256(record_id.encode("utf-8")).hexdigest()\n        return run_dir / "rejected" / f"{safe_id}.json"\n\n    def _write_rejection(\n        self, run_dir: Path, record_id: str, rejection: RejectedRecord\n    ) -> None:\n        path = self._rejection_path(run_dir, record_id)\n        payload = json.dumps(\n            rejection.model_dump(mode="json"),\n            ensure_ascii=False,\n            sort_keys=True,\n            separators=(",", ":"),\n        ) + "\\n"\n        if path.is_file():\n            if path.read_text(encoding="utf-8") != payload:\n                raise RuntimeError(f"rejection evidence changed for terminal record {record_id}")\n            return\n        path.parent.mkdir(parents=True, exist_ok=True)\n        _atomic_write_text(path, payload)\n\n    def _load_rejection(\n        self, run_dir: Path, record_id: str\n    ) -> RejectedRecord | None:\n        path = self._rejection_path(run_dir, record_id)\n        if not path.is_file():\n            return None\n        return RejectedRecord.model_validate_json(path.read_text(encoding="utf-8"))\n\n    def _stage_artifact_path''',
+          )
+          replace(
+              '''        "subject": "UNKNOWN",\n        "normalized": False,\n''',
+              '''        "subject": _subject_from_raw(raw),\n        "normalized": False,\n''',
+          )
+          replace(
+              '''def _source_snapshot_hash(descriptors: tuple[SourceDescriptor, ...]) -> str:\n    values = [descriptor.model_dump(mode="json") for descriptor in descriptors]\n    values.sort(key=lambda value: json.dumps(value, sort_keys=True, separators=(",", ":")))\n    return _hash_json(values)\n\n\ndef _run_id''',
+              '''def _has_trusted_source_revision(descriptor: SourceDescriptor) -> bool:\n    revision = descriptor.source_revision\n    return isinstance(revision, str) and bool(revision.strip())\n\n\ndef _source_snapshot_hash(descriptors: tuple[SourceDescriptor, ...]) -> str:\n    values = [descriptor.model_dump(mode="json") for descriptor in descriptors]\n    values.sort(key=lambda value: json.dumps(value, sort_keys=True, separators=(",", ":")))\n    return _hash_json(values)\n\n\ndef _source_content_snapshot_hash(\n    descriptors: tuple[SourceDescriptor, ...],\n    records: tuple[RawSourceRecord, ...],\n) -> str:\n    descriptor_values = [descriptor.model_dump(mode="json") for descriptor in descriptors]\n    descriptor_values.sort(\n        key=lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"))\n    )\n    return _hash_json(\n        {\n            "descriptors": descriptor_values,\n            "records": [record.model_dump(mode="json") for record in records],\n        }\n    )\n\n\ndef _serialize_source_records(records: tuple[RawSourceRecord, ...]) -> str:\n    return "".join(\n        json.dumps(\n            record.model_dump(mode="json"),\n            ensure_ascii=False,\n            sort_keys=True,\n            separators=(",", ":"),\n        )\n        + "\\n"\n        for record in records\n    )\n\n\ndef _run_id''',
+          )
+          replace(
+              '''def _audit_facts(raw: RawSourceRecord) -> dict[str, Any]:\n''',
+              '''def _subject_from_raw(raw: RawSourceRecord) -> str:\n    metadata = raw.model_dump(mode="json").get("metadata")\n    if not isinstance(metadata, dict):\n        return "UNKNOWN"\n    value = metadata.get("discipline")\n    if not isinstance(value, str):\n        return "UNKNOWN"\n    try:\n        return Discipline(value).value\n    except ValueError:\n        return "UNKNOWN"\n\n\ndef _reject_stage(current: RunStage) -> str:\n    stages = {\n        RunStage.ACQUIRED: "integrity",\n        RunStage.NORMALIZED: "classification",\n        RunStage.CLASSIFIED: "answer",\n        RunStage.ANSWER_VALIDATED: "analysis",\n        RunStage.ANALYSIS_VALIDATED: "early_dedup",\n        RunStage.EARLY_DEDUPED: "verification",\n        RunStage.VERIFIED: "final_dedup",\n        RunStage.FINAL_DEDUPED: "final_validation",\n    }\n    stage = stages.get(current)\n    if stage is None:\n        raise RuntimeError(f"unsupported rejection state: {current.value}")\n    return stage\n\n\ndef _reject_identity_evidence(\n    evidence: tuple[GateResultEvidence, ...],\n) -> GateResultEvidence | None:\n    for item in reversed(evidence):\n        if item.verdict is GateVerdict.REJECT:\n            return item\n    return evidence[-1] if evidence else None\n\n\ndef _audit_facts(raw: RawSourceRecord) -> dict[str, Any]:\n''',
+          )
+
+          path.write_text(text, encoding='utf-8')
+          PY
+          ruff format src/college_builder/pipeline/runner.py src/college_builder/reporting/pilot_report.py tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py
+          git diff --check
+      - name: Targeted Task 14 E2E
+        run: pytest tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py -q
+      - name: Full tests
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
+      - name: Commit verified repair to fix branch
+        run: |
+          git config user.name lingyi9909
+          git config user.email zhanhui9909@gmail.com
+          git add src/college_builder/pipeline/runner.py src/college_builder/reporting/pilot_report.py tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py
+          git commit -m 'fix: close Task 14 review blockers'
+          git push origin HEAD:fix/task14-review-blockers
