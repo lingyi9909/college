@@ -21,7 +21,7 @@ def test_frozen_config_loads_and_preserves_precision_thresholds() -> None:
     assert config.prompt_versions.model_dump() == {
         "university_classify": "v1",
         "problem_classify": "v1",
-        "analysis_classify": "v1",
+        "analysis_classify": "v2",
         "qa_alignment": "v1",
         "correctness_verify": "v1",
     }
