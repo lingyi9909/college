@@ -1,0 +1,127 @@
+name: Task 15 Real StackMathQA 5K Sample
+
+on:
+  push:
+    branches:
+      - ci/task15-real-stackmathqa-sample
+
+permissions:
+  contents: read
+
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ba7056219064c529ea0d7eabd898a901fffdc6e4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Stream exact upstream revision and certify deterministic 5K sample
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import time
+          from collections import Counter
+          from pathlib import Path
+
+          from college_builder.pipeline.pilot import FIVE_K_QUOTAS, FiveKPilotPlan, build_pilot_sample
+          from college_builder.source.stackmathqa import OFFICIAL_SOURCE_FILES, StackMathQAAdapter
+
+          revision = '13239ec8c8078bc8dfb43e1383069eb9be000ff7'
+          revision_token = f'git:{revision}'
+          base = (
+              'https://huggingface.co/datasets/math-ai/StackMathQA/resolve/'
+              f'{revision}/preprocessed/stackexchange-math--1q1a'
+          )
+
+          def records():
+              for filename in OFFICIAL_SOURCE_FILES:
+                  url = f'{base}/{filename}'
+                  print(f'STREAM_START {filename}', flush=True)
+                  started = time.monotonic()
+                  adapter = StackMathQAAdapter()
+                  descriptor = tuple(
+                      adapter.discover(
+                          {
+                              'data_file': url,
+                              'revision': revision_token,
+                              'license_metadata': {
+                                  'declared': 'CC-BY-4.0',
+                                  'status': 'UPSTREAM_DECLARED',
+                              },
+                          }
+                      )
+                  )[0]
+                  count = 0
+                  for record in adapter.acquire(descriptor):
+                      count += 1
+                      if count % 100000 == 0:
+                          print(f'STREAM_PROGRESS {filename} rows={count}', flush=True)
+                      yield record
+                  elapsed = time.monotonic() - started
+                  print(
+                      f'STREAM_DONE {filename} rows={count} seconds={elapsed:.1f}',
+                      flush=True,
+                  )
+
+          started = time.monotonic()
+          sample = build_pilot_sample(
+              records(),
+              plan=FiveKPilotPlan(seed=20260910),
+              source_revisions={'stackmathqa': revision_token},
+          )
+          elapsed = time.monotonic() - started
+          counts = Counter(str(record.metadata['source_site']) for record in sample.records)
+          assert sample.manifest.total == 5000
+          assert dict(counts) == FIVE_K_QUOTAS
+
+          payload = sample.manifest.model_dump(mode='json')
+          payload['upstream'] = {
+              'host': 'huggingface.co',
+              'dataset': 'math-ai/StackMathQA',
+              'revision_kind': 'huggingface_git_commit',
+              'revision': revision,
+              'path': 'preprocessed/stackexchange-math--1q1a',
+              'files': list(OFFICIAL_SOURCE_FILES),
+          }
+          payload['observed_selected_strata'] = dict(counts)
+          payload['stream_elapsed_seconds'] = round(elapsed, 3)
+          out = Path('task15-real-5k-sample-manifest.json')
+          out.write_text(
+              json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          digest = hashlib.sha256(out.read_bytes()).hexdigest()
+          print(f'REAL_5K_SAMPLE_TOTAL={sample.manifest.total}')
+          print(f'REAL_5K_SAMPLE_SHA256={sample.manifest.sample_sha256}')
+          print(f'REAL_5K_MANIFEST_FILE_SHA256={digest}')
+          print(f'REAL_5K_STRATA={json.dumps(dict(counts), sort_keys=True)}')
+          print(f'REAL_5K_SOURCE_REVISION={revision_token}')
+          PY
+      - name: Ensure manifest contains no raw question/answer text fields
+        shell: bash
+        run: |
+          ! grep -Eq 'raw_question|raw_answer|raw_analysis|raw_payload' task15-real-5k-sample-manifest.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path('task15-real-5k-sample-manifest.json').read_text())
+          assert payload['total'] == 5000
+          assert len(payload['sampled_record_ids']) == 5000
+          assert len(payload['sampled_raw_sha256']) == 5000
+          print('MANIFEST_CONTENT_SAFETY=PASS')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: task15-real-5k-sample-manifest
+          path: task15-real-5k-sample-manifest.json
+          if-no-files-found: error
+          retention-days: 30
