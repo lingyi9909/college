@@ -1,4 +1,4 @@
-name: Task 15 Answer Flow Fix and Verify v2
+name: Task 15 Source-Grounded Answer Flow TDD
 
 on:
   push:
@@ -8,80 +8,173 @@ permissions:
   contents: write
 
 jobs:
-  fix:
+  tdd:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/task15-pilot-freeze
           fetch-depth: 0
       - name: Assert exact starting HEAD
+        shell: bash
         run: |
+          set -euo pipefail
           test "$(git rev-parse HEAD)" = "3d1c047563d34d3de9bed01200256a50d84fb435"
           test -z "$(git status --porcelain)"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m pip install -e '.[dev]'
-      - name: Apply minimal production fix and regression
+
+      - name: RED 2 - verifier prompt-answer evidence mismatch
+        shell: bash
+        run: |
+          cat >> tests/unit/quality/test_verify.py <<'PY'
+
+          def test_alignment_accepts_prompt_answer_reference_when_answer_is_extracted_from_analysis() -> None:
+              candidate = _candidate(
+                  question="Explain the result.",
+                  answer="",
+                  analysis="The argument establishes the value; therefore 4",
+              )
+              refs = (
+                  f"question:0-{len(candidate.question)}",
+                  "answer:0-1",
+                  f"analysis:0-{len(candidate.analysis)}",
+              )
+              gate, provider = _alignment_gate(
+                  _decision("PASS", 0.999, candidate, evidence_references=refs)
+              )
+
+              evidence = _run(gate, candidate)
+
+              assert provider.requests[0].inputs["answer"] == "4"
+              assert evidence.verdict is GateVerdict.PASS
+              assert evidence.reason_code == "QA_ALIGNMENT_CONFIRMED"
+          PY
+          set +e
+          pytest -q tests/unit/quality/test_verify.py -k prompt_answer_reference_when_answer_is_extracted_from_analysis > /tmp/red2.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/red2.log
+          test "$rc" -ne 0
+          grep -q 'QA_ALIGNMENT_EVIDENCE_INVALID' /tmp/red2.log
+          echo TASK15_VERIFY_PROMPT_ANSWER_RED=PASS
+          git checkout -- tests/unit/quality/test_verify.py
+
+      - name: Apply minimal production fixes and permanent regressions
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          p = Path('src/college_builder/pipeline/runner.py')
-          s = p.read_text(encoding='utf-8')
-          pairs = [
-            (
-              '    def analysis(self, candidate: NormalizedQA) -> _AnalysisOutcome:\n        context = GateContext(config_version=self.config.config_version)\n        result = GateEngine[NormalizedQA](gates=(self._analysis,), context=context).run(candidate)\n',
-              '    def analysis(\n        self, candidate: NormalizedQA, answer: AnswerContent\n    ) -> _AnalysisOutcome:\n        final_answer = answer.final_answer\n        if not isinstance(final_answer, str) or not final_answer.strip():\n            return _AnalysisOutcome(None, (), "ANSWER_SOURCE_UNTRACEABLE")\n        analysis_candidate = candidate.model_copy(update={"answer": final_answer})\n        context = GateContext(config_version=self.config.config_version)\n        result = GateEngine[NormalizedQA](gates=(self._analysis,), context=context).run(\n            analysis_candidate\n        )\n'
-            ),
-            (
-              '            lambda raw: self._stage_analysis(run_dir, raw.record_id, normalized[raw.record_id]),\n',
-              '            lambda raw: self._stage_analysis(\n                run_dir, raw.record_id, normalized[raw.record_id], answers[raw.record_id]\n            ),\n'
-            ),
-            ('            fp = self._analysis_fingerprint(candidate)\n', '            fp = self._analysis_fingerprint(candidate, answers[raw.record_id])\n'),
-            (
-              '    def _stage_analysis(\n        self,\n        run_dir: Path,\n        record_id: str,\n        candidate: NormalizedQA,\n    ) -> _AnalysisOutcome:\n        fingerprint = self._analysis_fingerprint(candidate)\n',
-              '    def _stage_analysis(\n        self,\n        run_dir: Path,\n        record_id: str,\n        candidate: NormalizedQA,\n        answer: AnswerContent,\n    ) -> _AnalysisOutcome:\n        fingerprint = self._analysis_fingerprint(candidate, answer)\n'
-            ),
-            ('        outcome = self.processor.analysis(candidate)\n', '        outcome = self.processor.analysis(candidate, answer)\n'),
-            (
-              '    def _analysis_fingerprint(self, candidate: NormalizedQA) -> str:\n        return _hash_json(\n            {\n                "content": _candidate_hash(candidate),\n                "threshold": self.config.thresholds.analysis,\n',
-              '    def _analysis_fingerprint(\n        self, candidate: NormalizedQA, answer: AnswerContent\n    ) -> str:\n        return _hash_json(\n            {\n                "content": _candidate_hash(candidate),\n                "answer_authority": answer.model_dump(mode="json"),\n                "threshold": self.config.thresholds.analysis,\n'
-            ),
-          ]
-          for old, new in pairs:
-              if s.count(old) != 1:
-                  raise SystemExit(f'patch context count={s.count(old)} for {old[:60]!r}')
-              s = s.replace(old, new, 1)
-          p.write_text(s, encoding='utf-8', newline='\n')
 
-          t = Path('tests/e2e/test_pipeline_resume.py')
-          q = t.read_text(encoding='utf-8')
-          marker = 'test_stackmathqa_solution_only_flow_supplies_extracted_answer_to_analysis_gate'
-          assert marker not in q
-          q += '''\n\nclass CaptureAnalysisAnswerProvider(RuleProvider):\n    def __init__(self, *, provider: str, model: str) -> None:\n        super().__init__(provider=provider, model=model)\n        self.analysis_answers: list[object] = []\n\n    def classify(self, request: ModelClassificationRequest) -> ModelDecision:\n        if request.task == "gate_4_original_analysis":\n            self.analysis_answers.append(request.inputs.get("answer"))\n        return super().classify(request)\n\n\ndef test_stackmathqa_solution_only_flow_supplies_extracted_answer_to_analysis_gate(\n    tmp_path: Path,\n) -> None:\n    base = _record(3, "VALID")\n    analysis = "Add one to 3; therefore 4"\n    record = base.model_copy(update={"raw_answer": "", "raw_analysis": analysis})\n    config = _config()\n    workspace = tmp_path / "workspace"\n    primary = CaptureAnalysisAnswerProvider(provider="fixture-primary", model="primary-v1")\n    verifier = RuleProvider(provider="fixture-verifier", model="verifier-v1")\n    runner = PipelineRunner(\n        config=config, workspace=workspace,\n        processor=_processor(config=config, workspace=workspace, primary=primary, verifier=verifier),\n    )\n    result = runner.run(\n        adapter=CountingAdapter((record,)), source_config={}, output_dir=tmp_path / "output"\n    )\n    assert primary.analysis_answers == ["4"]\n    assert result.accepted_count == 1\n    rows = [json.loads(line) for line in result.output_path.read_text(encoding="utf-8").splitlines() if line.strip()]\n    assert len(rows) == 1\n    assert len(rows[0]) == 19\n    assert rows[0]["text_answer"] == "4"\n    assert rows[0]["answer_analysis"] == analysis\n'''
-          t.write_text(q, encoding='utf-8', newline='\n')
+          runner = Path('src/college_builder/pipeline/runner.py')
+          s = runner.read_text(encoding='utf-8')
+          replacements = [
+              (
+                  '''    def analysis(self, candidate: NormalizedQA) -> _AnalysisOutcome:\n        context = GateContext(config_version=self.config.config_version)\n        result = GateEngine[NormalizedQA](gates=(self._analysis,), context=context).run(candidate)\n''',
+                  '''    def analysis(\n        self, candidate: NormalizedQA, answer: AnswerContent\n    ) -> _AnalysisOutcome:\n        final_answer = answer.final_answer\n        if not isinstance(final_answer, str) or not final_answer.strip():\n            return _AnalysisOutcome(None, (), "ANSWER_SOURCE_UNTRACEABLE")\n        analysis_candidate = candidate.model_copy(update={"answer": final_answer})\n        context = GateContext(config_version=self.config.config_version)\n        result = GateEngine[NormalizedQA](gates=(self._analysis,), context=context).run(\n            analysis_candidate\n        )\n'''
+              ),
+              (
+                  '''            lambda raw: self._stage_analysis(run_dir, raw.record_id, normalized[raw.record_id]),\n''',
+                  '''            lambda raw: self._stage_analysis(\n                run_dir, raw.record_id, normalized[raw.record_id], answers[raw.record_id]\n            ),\n'''
+              ),
+              (
+                  '''            fp = self._analysis_fingerprint(candidate)\n''',
+                  '''            fp = self._analysis_fingerprint(candidate, answers[raw.record_id])\n'''
+              ),
+              (
+                  '''    def _stage_analysis(\n        self,\n        run_dir: Path,\n        record_id: str,\n        candidate: NormalizedQA,\n    ) -> _AnalysisOutcome:\n        fingerprint = self._analysis_fingerprint(candidate)\n''',
+                  '''    def _stage_analysis(\n        self,\n        run_dir: Path,\n        record_id: str,\n        candidate: NormalizedQA,\n        answer: AnswerContent,\n    ) -> _AnalysisOutcome:\n        fingerprint = self._analysis_fingerprint(candidate, answer)\n'''
+              ),
+              (
+                  '''        outcome = self.processor.analysis(candidate)\n''',
+                  '''        outcome = self.processor.analysis(candidate, answer)\n'''
+              ),
+              (
+                  '''    def _analysis_fingerprint(self, candidate: NormalizedQA) -> str:\n        return _hash_json(\n            {\n                "content": _candidate_hash(candidate),\n                "threshold": self.config.thresholds.analysis,\n''',
+                  '''    def _analysis_fingerprint(\n        self, candidate: NormalizedQA, answer: AnswerContent\n    ) -> str:\n        return _hash_json(\n            {\n                "content": _candidate_hash(candidate),\n                "answer_authority": answer.model_dump(mode="json"),\n                "threshold": self.config.thresholds.analysis,\n'''
+              ),
+          ]
+          for old, new in replacements:
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'runner patch context count={count}: {old[:80]!r}')
+              s = s.replace(old, new, 1)
+          runner.write_text(s, encoding='utf-8', newline='\n')
+
+          verify = Path('src/college_builder/quality/verify.py')
+          v = verify.read_text(encoding='utf-8')
+          old_call = '''            decision,\n            candidate,\n            extraction,\n        )\n'''
+          new_call = '''            decision,\n            candidate,\n            extraction,\n            final_answer,\n        )\n'''
+          if v.count(old_call) != 2:
+              raise SystemExit(f'verifier call contexts={v.count(old_call)}')
+          v = v.replace(old_call, new_call)
+          old_fn = '''def _validated_source_references(\n    decision: ModelDecision,\n    candidate: NormalizedQA,\n    extraction: AnswerExtraction,\n) -> tuple[tuple[str, ...], bool, int]:\n    source = {\n        "question": candidate.question,\n        "answer": candidate.answer,\n        "analysis": candidate.analysis,\n    }\n'''
+          new_fn = '''def _validated_source_references(\n    decision: ModelDecision,\n    candidate: NormalizedQA,\n    extraction: AnswerExtraction,\n    final_answer: str,\n) -> tuple[tuple[str, ...], bool, int]:\n    # Evidence references are offsets into the exact fields shown to the verifier.\n    # The prompt's answer field is the source-grounded final answer, which may have\n    # been extracted verbatim from analysis even when candidate.answer is empty.\n    source = {\n        "question": candidate.question,\n        "answer": final_answer,\n        "analysis": candidate.analysis,\n    }\n'''
+          if v.count(old_fn) != 1:
+              raise SystemExit('verifier function context mismatch')
+          v = v.replace(old_fn, new_fn, 1)
+          old_authority = '''        if field == source_field and start <= authority_start and authority_end <= end:\n            authority_covered = True\n'''
+          new_authority = '''        if field == source_field:\n            if source_field == "answer":\n                # The verifier sees the trimmed/extracted literal answer as its answer field.\n                # AnswerExtraction already ties that literal back to the original source span.\n                authority_covered = start == 0 and end == len(final_answer)\n            elif start <= authority_start and authority_end <= end:\n                authority_covered = True\n'''
+          if v.count(old_authority) != 1:
+              raise SystemExit('authority coverage context mismatch')
+          v = v.replace(old_authority, new_authority, 1)
+          verify.write_text(v, encoding='utf-8', newline='\n')
+
+          pipeline_test = Path('tests/e2e/test_pipeline_resume.py')
+          q = pipeline_test.read_text(encoding='utf-8')
+          marker = 'test_stackmathqa_solution_only_flow_supplies_extracted_answer_through_export'
+          if marker in q:
+              raise SystemExit('pipeline regression already exists')
+          q += '''\n\nclass CaptureAnalysisAnswerProvider(RuleProvider):\n    def __init__(self, *, provider: str, model: str) -> None:\n        super().__init__(provider=provider, model=model)\n        self.analysis_answers: list[object] = []\n\n    def classify(self, request: ModelClassificationRequest) -> ModelDecision:\n        if request.task == "gate_4_original_analysis":\n            self.analysis_answers.append(request.inputs.get("answer"))\n        return super().classify(request)\n\n\ndef test_stackmathqa_solution_only_flow_supplies_extracted_answer_through_export(\n    tmp_path: Path,\n) -> None:\n    base = _record(3, "VALID")\n    analysis = "Add one to 3; therefore 4"\n    record = base.model_copy(update={"raw_answer": "", "raw_analysis": analysis})\n    config = _config()\n    workspace = tmp_path / "workspace"\n    primary = CaptureAnalysisAnswerProvider(provider="fixture-primary", model="primary-v1")\n    verifier = RuleProvider(provider="fixture-verifier", model="verifier-v1")\n    runner = PipelineRunner(\n        config=config, workspace=workspace,\n        processor=_processor(config=config, workspace=workspace, primary=primary, verifier=verifier),\n    )\n\n    result = runner.run(\n        adapter=CountingAdapter((record,)), source_config={}, output_dir=tmp_path / "output"\n    )\n\n    assert primary.analysis_answers == ["4"]\n    assert result.accepted_count == 1\n    rows = [\n        json.loads(line)\n        for line in result.output_path.read_text(encoding="utf-8").splitlines()\n        if line.strip()\n    ]\n    assert len(rows) == 1\n    assert len(rows[0]) == 19\n    assert rows[0]["text_answer"] == "4"\n    assert rows[0]["answer_analysis"] == analysis\n''' 
+          pipeline_test.write_text(q, encoding='utf-8', newline='\n')
+
+          verify_test = Path('tests/unit/quality/test_verify.py')
+          t = verify_test.read_text(encoding='utf-8')
+          marker2 = 'test_alignment_accepts_prompt_answer_reference_when_answer_is_extracted_from_analysis'
+          if marker2 in t:
+              raise SystemExit('verify regression already exists')
+          t += '''\n\ndef test_alignment_accepts_prompt_answer_reference_when_answer_is_extracted_from_analysis() -> None:\n    candidate = _candidate(\n        question="Explain the result.",\n        answer="",\n        analysis="The argument establishes the value; therefore 4",\n    )\n    refs = (\n        f"question:0-{len(candidate.question)}",\n        "answer:0-1",\n        f"analysis:0-{len(candidate.analysis)}",\n    )\n    gate, provider = _alignment_gate(\n        _decision("PASS", 0.999, candidate, evidence_references=refs)\n    )\n\n    evidence = _run(gate, candidate)\n\n    assert provider.requests[0].inputs["answer"] == "4"\n    assert evidence.verdict is GateVerdict.PASS\n    assert evidence.reason_code == "QA_ALIGNMENT_CONFIRMED"\n\n\ndef test_correctness_accepts_prompt_answer_reference_when_answer_is_extracted_from_analysis() -> None:\n    candidate = _candidate(\n        question="Explain the result.",\n        answer="",\n        analysis="The argument establishes the value; therefore 4",\n    )\n    refs = (\n        f"question:0-{len(candidate.question)}",\n        "answer:0-1",\n        f"analysis:0-{len(candidate.analysis)}",\n    )\n    gate, provider = _correctness_gate(\n        _decision("PASS", 0.999, candidate, evidence_references=refs)\n    )\n\n    evidence = _run(gate, candidate)\n\n    assert provider.requests[0].inputs["answer"] == "4"\n    assert evidence.verdict is GateVerdict.PASS\n    assert evidence.reason_code == "CORRECTNESS_CONFIRMED"\n'''
+          verify_test.write_text(t, encoding='utf-8', newline='\n')
           PY
-      - name: GREEN targeted regression
-        run: pytest -q tests/e2e/test_pipeline_resume.py -k stackmathqa_solution_only_flow_supplies_extracted_answer_to_analysis_gate
-      - name: Relevant regressions
-        run: pytest -q tests/e2e/test_pipeline_resume.py tests/e2e/test_final_export.py tests/e2e/test_gold_regression.py tests/e2e/test_task15_pipeline_concurrency.py
+
+      - name: GREEN source-grounded answer regressions
+        run: >-
+          pytest -q
+          tests/e2e/test_pipeline_resume.py -k stackmathqa_solution_only_flow_supplies_extracted_answer_through_export
+          tests/unit/quality/test_verify.py -k prompt_answer_reference_when_answer_is_extracted_from_analysis
+      - name: Relevant pipeline export verification regressions
+        run: >-
+          pytest -q
+          tests/e2e/test_pipeline_resume.py
+          tests/e2e/test_final_export.py
+          tests/e2e/test_gold_regression.py
+          tests/e2e/test_task15_pipeline_concurrency.py
+          tests/unit/quality/test_verify.py
+          tests/unit/quality/test_answer.py
       - name: Full pytest
         run: pytest -q
       - name: Ruff
         run: ruff check src tests
       - name: MyPy
         run: mypy src
-      - name: Commit to Task 15 feature branch
+      - name: Scope guard
         shell: bash
         run: |
           set -euo pipefail
           git diff --check
+          test -z "$(git ls-files 'artifacts/5k/sample.jsonl')"
+          ! git ls-files | grep -Eq '^\.github/workflows/task15-'
+          git status --short
+      - name: Commit verified production fix to feature only
+        shell: bash
+        run: |
+          set -euo pipefail
           git config user.name lingyi9909
           git config user.email zhanhui9909@gmail.com
-          git add src/college_builder/pipeline/runner.py tests/e2e/test_pipeline_resume.py
-          git commit -m "fix: propagate extracted answer into analysis gate"
+          git add src/college_builder/pipeline/runner.py src/college_builder/quality/verify.py tests/e2e/test_pipeline_resume.py tests/unit/quality/test_verify.py
+          git commit -m "fix: preserve source-grounded answer through quality gates"
           git push origin HEAD:feature/task15-pilot-freeze
           echo TASK15_FIX_HEAD=$(git rev-parse HEAD)
