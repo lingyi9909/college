@@ -1,0 +1,31 @@
+name: Task 15 Copilot Access Probe
+
+on:
+  push:
+    branches:
+      - ci/task15-copilot-access-probe
+
+permissions:
+  contents: read
+  copilot-requests: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install current Copilot CLI
+        run: npm install -g @github/copilot
+      - name: Make one non-agentic model request
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          copilot -p 'Reply with exactly: TASK15_COPILOT_PROBE_OK' -s --no-ask-user > /tmp/copilot-probe.txt
+          cat /tmp/copilot-probe.txt
+          grep -q 'TASK15_COPILOT_PROBE_OK' /tmp/copilot-probe.txt
+          echo 'COPILOT_MODEL_ACCESS=PASS'
