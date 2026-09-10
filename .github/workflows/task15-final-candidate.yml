@@ -1,0 +1,38 @@
+name: Task 15 Final Candidate
+on: push
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ba7056219064c529ea0d7eabd898a901fffdc6e4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - run: git rev-parse HEAD
+      - name: Task 15 targeted
+        run: pytest tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_5k.py tests/e2e/test_pilot_sample_command.py tests/e2e/test_gold_regression.py tests/unit/source/test_gold.py tests/unit/source/test_stackmathqa.py -q
+      - name: Full tests
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
+      - name: Verify safe Task 15 committed artifacts
+        shell: bash
+        run: |
+          test ! -f artifacts/5k/sample.jsonl
+          test ! -f artifacts/5k/sample_manifest.json
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          config = Path('config/pilot-5k-frozen.yaml')
+          summary = json.loads(Path('artifacts/5k/run_report.json').read_text())
+          assert hashlib.sha256(config.read_bytes()).hexdigest() == summary['config_sha256']
+          assert summary['status'] == 'BLOCKED_EXTERNAL_PROVIDER'
+          assert summary['raw_rows_committed'] is False
+          assert summary['engineering_preflight']['gold_complete_pipeline_regression'] == 'PASS'
+          PY
