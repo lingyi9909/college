@@ -10,10 +10,16 @@ thresholds:
 providers:
   classifier:
     name: openai_compatible
-    model: pilot-classifier-v1
+    model: deepseek-flash
+    timeout_seconds: 60.0
+    max_attempts: 3
+    retry_backoff_seconds: 1.0
   verifier:
     name: openai_compatible
-    model: pilot-verifier-v1
+    model: deepseek-v4-pro
+    timeout_seconds: 90.0
+    max_attempts: 3
+    retry_backoff_seconds: 1.0
 prompt_versions:
   university_classify: v1
   problem_classify: v1
