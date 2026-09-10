@@ -340,3 +340,52 @@ def test_prompt_or_gate_config_change_invalidates_only_affected_decisions(tmp_pa
     assert third_primary.calls["gate_2_problem"] == 3
     assert third_primary.calls["gate_4_original_analysis"] == 0
     assert sum(third_verifier.calls.values()) == 0
+
+
+def test_resume_report_preserves_usage_from_interrupted_attempt(tmp_path: Path) -> None:
+    records = tuple(_record(index, "VALID") for index in range(1, 4))
+    adapter = CountingAdapter(records)
+    config = _config()
+    workspace = tmp_path / "workspace"
+    first_primary = RuleProvider(provider="fixture-primary", model="primary-v1")
+    first_verifier = RuleProvider(provider="fixture-verifier", model="verifier-v1")
+    first_runner = PipelineRunner(
+        config=config,
+        workspace=workspace,
+        processor=_processor(
+            config=config,
+            workspace=workspace,
+            primary=first_primary,
+            verifier=first_verifier,
+        ),
+    )
+
+    with pytest.raises(PipelineInterrupted) as interrupted:
+        first_runner.run(
+            adapter=adapter,
+            source_config={},
+            output_dir=tmp_path / "first",
+            interrupt_after=RunStage.ANALYSIS_VALIDATED,
+        )
+
+    first_calls = first_primary.calls + first_verifier.calls
+    assert sum(first_calls.values()) > 0
+
+    second_primary = RuleProvider(provider="fixture-primary", model="primary-v1")
+    second_verifier = RuleProvider(provider="fixture-verifier", model="verifier-v1")
+    second_runner = PipelineRunner(
+        config=config,
+        workspace=workspace,
+        processor=_processor(
+            config=config,
+            workspace=workspace,
+            primary=second_primary,
+            verifier=second_verifier,
+        ),
+    )
+    result = second_runner.resume(run_id=interrupted.value.run_id, output_dir=tmp_path / "second")
+    report = json.loads(result.report_path.read_text(encoding="utf-8"))
+    second_calls = second_primary.calls + second_verifier.calls
+    expected = first_calls + second_calls
+
+    assert report["provider_call_counts"] == dict(sorted(expected.items()))
