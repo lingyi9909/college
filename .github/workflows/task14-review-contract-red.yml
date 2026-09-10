@@ -1,0 +1,108 @@
+name: Task 14 Reviewer Contract RED
+
+on:
+  push:
+    branches:
+      - verification/task14-review-contract-red
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact Task 14 develop HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: e43489be59893fe5901395b3b03661ea15ad6e1d
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Task 14 independent acceptance contracts
+        shell: bash
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import json
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+
+          from college_builder.pipeline.runner import PipelineRunner
+          from college_builder.reporting.pilot_report import ProviderUsage, RecordAudit, build_pilot_report
+
+          failures = []
+
+          # Contract 1: Task 14 plan requires the full funnel split by source/subject,
+          # not only raw/final-accepted distribution counts.
+          audits = (
+              RecordAudit(record_id="1", source_dataset="a", subject="MATHEMATICS", normalized=True, stem=True, university=True, university_stem=True, problem=True, answer_valid=True, analysis_valid=True, after_dedup=True, alignment_pass=True, correctness_pass=True, accepted=True),
+              RecordAudit(record_id="2", source_dataset="a", subject="MATHEMATICS", normalized=True, stem=True, university=False, reject_reason="NOT_UNIVERSITY_LEVEL"),
+              RecordAudit(record_id="3", source_dataset="b", subject="PHYSICS", normalized=True, stem=True, university=True, university_stem=True, problem=False, reject_reason="NOT_PROBLEM"),
+          )
+          report = build_pilot_report(run_id="run-contract", audits=audits, provider_usage=ProviderUsage(), wall_time_seconds=0.0)
+          required_split = {"raw", "stem", "university", "problem", "answer_valid", "analysis_valid", "alignment_pass", "after_dedup", "final_accepted"}
+          for label, distribution in (("source", report.source_distribution), ("subject", report.subject_distribution)):
+              for key, bucket in distribution.items():
+                  present = set(bucket.model_dump(mode="json"))
+                  if not required_split <= present:
+                      failures.append(f"{label} split {key!r} lacks full funnel: present={sorted(present)}")
+                      break
+
+          # Reuse the repository's deterministic Task 14 fixture definitions for pipeline contracts.
+          spec = importlib.util.spec_from_file_location("task14_fixture", "tests/e2e/test_pipeline_resume.py")
+          fixture = importlib.util.module_from_spec(spec)
+          assert spec and spec.loader
+          spec.loader.exec_module(fixture)
+
+          # Contract 2: SourceDescriptor.source_revision is optional by the approved source contract.
+          # If absent, changing actual source content must not silently reuse the old source snapshot.
+          with TemporaryDirectory() as td:
+              root = Path(td)
+              workspace = root / "workspace"
+              config = fixture._config()
+              first_adapter = fixture.CountingAdapter((fixture._record(1, "VALID"),), revision=None)
+              p1 = fixture.RuleProvider(provider="fixture-primary", model="primary-v1")
+              v1 = fixture.RuleProvider(provider="fixture-verifier", model="verifier-v1")
+              first = PipelineRunner(config=config, workspace=workspace, processor=fixture._processor(config=config, workspace=workspace, primary=p1, verifier=v1))
+              first_result = first.run(adapter=first_adapter, source_config={}, output_dir=root / "out1")
+
+              second_adapter = fixture.CountingAdapter((fixture._record(2, "VALID"),), revision=None)
+              p2 = fixture.RuleProvider(provider="fixture-primary", model="primary-v1")
+              v2 = fixture.RuleProvider(provider="fixture-verifier", model="verifier-v1")
+              second = PipelineRunner(config=config, workspace=workspace, processor=fixture._processor(config=config, workspace=workspace, primary=p2, verifier=v2))
+              second_result = second.run(adapter=second_adapter, source_config={}, output_dir=root / "out2")
+              second_questions = (root / "out2" / "questions.jsonl").read_text(encoding="utf-8")
+              if second_adapter.acquire_calls == 0 or "Q2" not in second_questions or first_result.run_id == second_result.run_id:
+                  failures.append("revisionless changed source silently reused the previous source snapshot/run identity")
+
+          # Contract 3: Design requires every rejected record to persist reject evidence/version identity.
+          # Gate 0 rejects currently have only state/audit facts, so their actual GateEvidence is lost.
+          with TemporaryDirectory() as td:
+              root = Path(td)
+              workspace = root / "workspace"
+              config = fixture._config()
+              valid = fixture._record(4, "VALID")
+              corrupt = valid.model_copy(update={"raw_sha256": "f" * 64})
+              adapter = fixture.CountingAdapter((corrupt,), revision="corrupt-v1")
+              primary = fixture.RuleProvider(provider="fixture-primary", model="primary-v1")
+              verifier = fixture.RuleProvider(provider="fixture-verifier", model="verifier-v1")
+              runner = PipelineRunner(config=config, workspace=workspace, processor=fixture._processor(config=config, workspace=workspace, primary=primary, verifier=verifier))
+              result = runner.run(adapter=adapter, source_config={}, output_dir=root / "out")
+              persisted = []
+              for path in result.run_dir.rglob("*.json"):
+                  persisted.append(path.read_text(encoding="utf-8"))
+              evidence_found = any("gate_0_integrity_provenance" in text and "SOURCE_CORRUPTED" in text for text in persisted)
+              if not evidence_found:
+                  failures.append("Gate 0 rejected record did not persist its rejection GateEvidence/version identity")
+
+          if failures:
+              print("TASK14_ACCEPTANCE_RED")
+              for failure in failures:
+                  print("-", failure)
+              raise SystemExit(1)
+          print("TASK14_ACCEPTANCE_GREEN")
+          PY
