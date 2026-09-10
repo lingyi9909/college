@@ -1,0 +1,86 @@
+name: Task 15 100 Preview Zero Model
+
+on:
+  push:
+    branches:
+      - ci/task15-100-preview-zero-model
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3d1c047563d34d3de9bed01200256a50d84fb435
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Build same bounded 100-record sample and preview 8 rows
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from college_builder.normalize.normalizer import normalize
+          from college_builder.quality.answer import extract_source_answer
+          from college_builder.source.stackmathqa import OFFICIAL_SOURCE_FILES, StackMathQAAdapter
+
+          quotas = {'math': 40, 'physics': 20, 'statistics': 20, 'mathoverflow': 20}
+          revision = 'git:13239ec8c8078bc8dfb43e1383069eb9be000ff7'
+          base = ('https://huggingface.co/datasets/math-ai/StackMathQA/resolve/'
+                  '13239ec8c8078bc8dfb43e1383069eb9be000ff7/'
+                  'preprocessed/stackexchange-math--1q1a')
+          selected = []
+          counts = {key: 0 for key in quotas}
+          by_stratum = {key: [] for key in quotas}
+
+          for filename, (stratum, _host) in OFFICIAL_SOURCE_FILES.items():
+              quota = quotas[stratum]
+              adapter = StackMathQAAdapter()
+              descriptor = tuple(adapter.discover({
+                  'data_file': f'{base}/{filename}',
+                  'revision': revision,
+                  'license_metadata': {'declared': 'CC-BY-4.0', 'status': 'UPSTREAM_DECLARED'},
+              }))[0]
+              for record in adapter.acquire(descriptor):
+                  if counts[stratum] >= quota:
+                      break
+                  if record.metadata.get('language') != 'en':
+                      continue
+                  if len(record.raw_question) > 1600 or len(record.raw_analysis) > 3200:
+                      continue
+                  if extract_source_answer(normalize(record)).final_answer is None:
+                      continue
+                  selected.append(record)
+                  by_stratum[stratum].append(record)
+                  counts[stratum] += 1
+
+          assert counts == quotas, (counts, quotas)
+          assert len(selected) == 100
+          preview = []
+          for stratum in ('math', 'physics', 'statistics', 'mathoverflow'):
+              for record in by_stratum[stratum][:2]:
+                  preview.append({
+                      'stratum': stratum,
+                      'source_record_id': record.record_id,
+                      'source_url': record.source_url,
+                      'question': record.raw_question,
+                      'answer': record.raw_answer,
+                      'analysis': record.raw_analysis,
+                  })
+          Path('/tmp/task15-100-preview.json').write_text(
+              json.dumps({'counts': counts, 'preview': preview}, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          print('TASK15_100_PREVIEW_READY=8')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: task15-100-preview-zero-model
+          path: /tmp/task15-100-preview.json
+          retention-days: 7
