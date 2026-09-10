@@ -1,5 +1,5 @@
 {
-  "blocker": "The repository CI environment does not provide a usable OpenAI-compatible endpoint and matching provider credentials, so the real model-backed 5K run has not been executed and no acceptance, reject-distribution, cost, latency, or quality metrics are fabricated.",
+  "blocker": "The real model-backed 5K run remains blocked because the repository has no configured external OpenAI-compatible endpoint/credentials and the GitHub Actions Copilot execution path available to this repository supports auto routing but exposes no usable explicit fixed model selector. Task 15 requires stable classifier/verifier model identities and an independent verifier, so auto routing cannot be used as the frozen 5K provider and no acceptance, reject-distribution, cost, latency, or quality metrics are fabricated.",
   "config_sha256": "0c13691fce9a8300cf159db55fc2ae3ba0135d8abb123605686697aab54341b4",
   "config_version": "pilot-5k-frozen-v1",
   "engineering_preflight": {
@@ -18,11 +18,49 @@
     "qa_alignment": "v1",
     "university_classify": "v1"
   },
+  "provider_execution_evidence": {
+    "copilot_auto_micro_run": {
+      "accepted_count": 0,
+      "code_sha": "ba7056219064c529ea0d7eabd898a901fffdc6e4",
+      "model_identity_freezeable": false,
+      "model_selector": "auto",
+      "pipeline_provider_errors": 0,
+      "proxy_model_calls": 6,
+      "proxy_nonzero_calls": 0,
+      "reject_reason_counts": {
+        "ANALYSIS_TOO_SHALLOW": 1,
+        "UNIVERSITY_LEVEL_UNCERTAIN": 2,
+        "VERIFIER_NOT_INDEPENDENT": 1
+      },
+      "run_id": 34445107273,
+      "status": "PIPELINE_PATH_PASS_PROVIDER_IDENTITY_BLOCKED"
+    },
+    "copilot_fixed_model_diagnostics": {
+      "cli_version": "1.0.83",
+      "code_sha": "ba7056219064c529ea0d7eabd898a901fffdc6e4",
+      "documented_cli_model_candidates": [
+        "claude-sonnet-4.6",
+        "gpt-5.4",
+        "claude-haiku-4.5",
+        "gpt-5.3-codex",
+        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash",
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
+        "mai-code-1-flash"
+      ],
+      "error": "Model <name> from --model flag is not available",
+      "explicit_model_success_count": 0,
+      "run_id": 34448910429,
+      "status": "NO_EXPLICIT_MODEL_AVAILABLE_IN_CURRENT_ACTIONS_EXECUTION_CONTEXT"
+    }
+  },
   "providers": {
     "classifier": "openai_compatible/pilot-classifier-v1",
     "verifier": "openai_compatible/pilot-verifier-v1"
   },
   "raw_rows_committed": false,
+  "required_unblock": "Provide an execution environment reachable by the existing openai_compatible adapter with at least two stable explicit model identities (classifier and verifier), or change the GitHub Copilot execution entitlement/policy so at least two explicit CLI models are actually selectable. Do not use Copilot auto routing as the frozen identity and do not bypass VERIFIER_NOT_INDEPENDENT.",
   "sampling": {
     "quotas": {
       "math": 2000,
@@ -30,10 +68,11 @@
       "physics": 1000,
       "statistics": 1000
     },
+    "sample_sha256": "e9d7b957a092114da35dbb839319a08ab555692a8a06863faf2b1980c2a681c5",
     "seed": 20260910
   },
   "sampling_command": "college-builder pilot sample --source-root <staged-stackmathqa> --source-revision git:13239ec8c8078bc8dfb43e1383069eb9be000ff7 --seed 20260910 --output artifacts/5k/sample.jsonl --manifest artifacts/5k/sample_manifest.json",
   "source_dataset": "math-ai/StackMathQA",
   "source_revision": "git:13239ec8c8078bc8dfb43e1383069eb9be000ff7",
-  "status": "BLOCKED_EXTERNAL_PROVIDER"
+  "status": "BLOCKED_STABLE_PROVIDER_IDENTITY"
 }
