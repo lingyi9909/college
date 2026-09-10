@@ -34,9 +34,10 @@ def test_pilot_plan_command_emits_exact_5k_strata_and_seed() -> None:
     assert payload["seed"] == 20260910
     assert payload["total"] == 5000
     assert payload["quotas"] == FIVE_K_QUOTAS
-    assert FiveKPilotPlan.model_validate(
-        {"seed": payload["seed"], "quotas": payload["quotas"]}
-    ).total == 5000
+    assert (
+        FiveKPilotPlan.model_validate({"seed": payload["seed"], "quotas": payload["quotas"]}).total
+        == 5000
+    )
 
 
 def test_task15_report_and_summary_are_non_raw_and_self_consistent() -> None:

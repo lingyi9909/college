@@ -1,0 +1,30 @@
+{
+  "status": "BLOCKED_EXTERNAL_PROVIDER",
+  "pilot_size": 5000,
+  "sampling": {
+    "seed": 20260910,
+    "quotas": {
+      "math": 2000,
+      "physics": 1000,
+      "statistics": 1000,
+      "mathoverflow": 1000
+    }
+  },
+  "source_dataset": "math-ai/StackMathQA",
+  "source_revision": "git:13239ec8c8078bc8dfb43e1383069eb9be000ff7",
+  "config_version": "pilot-5k-frozen-v1",
+  "config_sha256": "0c13691fce9a8300cf159db55fc2ae3ba0135d8abb123605686697aab54341b4",
+  "prompt_versions": {
+    "university_classify": "v1",
+    "problem_classify": "v1",
+    "analysis_classify": "v1",
+    "qa_alignment": "v1",
+    "correctness_verify": "v1"
+  },
+  "providers": {
+    "classifier": "openai_compatible/pilot-classifier-v1",
+    "verifier": "openai_compatible/pilot-verifier-v1"
+  },
+  "blocker": "OPENAI_COMPATIBLE_BASE_URL and provider credentials are not available to the repository CI environment; no model-backed 5K acceptance metrics are fabricated.",
+  "raw_rows_committed": false
+}

@@ -20,7 +20,9 @@ from college_builder.source.base import AdapterCheckpoint, SourceDescriptor
 
 app = typer.Typer(no_args_is_help=True)
 config_app = typer.Typer(no_args_is_help=True)
+pilot_app = typer.Typer(no_args_is_help=True)
 app.add_typer(config_app, name="config")
+app.add_typer(pilot_app, name="pilot")
 
 
 class _LocalJsonlAdapter:
@@ -77,6 +79,24 @@ def _runner(config: PipelineConfig, workspace: Path) -> PipelineRunner:
         project_root=Path("."),
     )
     return PipelineRunner(config=config, workspace=workspace, processor=processor)
+
+
+@pilot_app.command("plan")
+def pilot_plan_command(
+    seed: Annotated[int, typer.Option("--seed")] = 20260910,
+) -> None:
+    """Print the approved deterministic Task 15 5K sampling plan."""
+    from college_builder.pipeline.pilot import FiveKPilotPlan
+
+    plan = FiveKPilotPlan(seed=seed)
+    typer.echo(
+        json.dumps(
+            plan.as_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
 
 
 @app.command("run")
