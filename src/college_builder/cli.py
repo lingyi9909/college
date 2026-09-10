@@ -1,4 +1,4 @@
-"""CLI entrypoints for Task 14 pipeline execution, resume, report, and config validation."""
+"""CLI entrypoints for pipeline execution, pilot sampling, resume, report, and validation."""
 
 from __future__ import annotations
 
@@ -93,6 +93,46 @@ def pilot_plan_command(
         json.dumps(
             plan.as_dict(),
             ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+
+
+@pilot_app.command("sample")
+def pilot_sample_command(
+    source_root: Annotated[
+        Path, typer.Option("--source-root", exists=True, file_okay=False)
+    ],
+    source_revision: Annotated[str, typer.Option("--source-revision")],
+    seed: Annotated[int, typer.Option("--seed")] = 20260910,
+    output: Annotated[Path, typer.Option("--output")] = Path("artifacts/5k/sample.jsonl"),
+    manifest: Annotated[Path, typer.Option("--manifest")] = Path(
+        "artifacts/5k/sample_manifest.json"
+    ),
+) -> None:
+    """Materialize the approved deterministic 5K StackMathQA runtime sample."""
+    from college_builder.pipeline.pilot import (
+        FiveKPilotPlan,
+        sample_stackmathqa_source_root,
+        write_pilot_sample,
+    )
+
+    sample = sample_stackmathqa_source_root(
+        source_root,
+        source_revision=source_revision,
+        plan=FiveKPilotPlan(seed=seed),
+    )
+    write_pilot_sample(sample, output_path=output, manifest_path=manifest)
+    typer.echo(
+        json.dumps(
+            {
+                "manifest": str(manifest),
+                "output": str(output),
+                "sample_sha256": sample.manifest.sample_sha256,
+                "seed": seed,
+                "total": sample.manifest.total,
+            },
             sort_keys=True,
             separators=(",", ":"),
         )
