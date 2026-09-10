@@ -1,0 +1,99 @@
+name: Task 14 MyPy Fix 3
+on:
+  push:
+    branches: [verification/task14-mypy-fix3]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/task14-pipeline-runner
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - name: Apply complete type-only patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/college_builder/pipeline/runner.py')
+          text = path.read_text(encoding='utf-8')
+
+          old_import = 'from college_builder.quality.engine import GateContext, GateEngine, GateResultEvidence'
+          new_import = '''from college_builder.quality.engine import (
+              GateContext,
+              GateEngine,
+              GateResultEvidence,
+              QualityGate,
+          )'''
+          assert old_import in text
+          text = text.replace(old_import, new_import)
+
+          text = text.replace('GateEngine(gates=', 'GateEngine[NormalizedQA](gates=')
+
+          def rename_block(source: str, assignment: str, end_marker: str, replacement: str) -> str:
+              start = source.index(assignment)
+              end = source.index(end_marker, start)
+              block = source[start:end]
+              assert 'outcome' in block
+              block = block.replace('outcome', replacement)
+              return source[:start] + block + source[end:]
+
+          text = rename_block(
+              text,
+              '            outcome = self._stage_classification',
+              '        self._interrupt_if_requested(run_id, interrupt_after, RunStage.CLASSIFIED)',
+              'classification_outcome',
+          )
+          text = rename_block(
+              text,
+              '            outcome = self._stage_answer',
+              '        self._interrupt_if_requested(run_id, interrupt_after, RunStage.ANSWER_VALIDATED)',
+              'answer_outcome',
+          )
+          text = rename_block(
+              text,
+              '            outcome = self._stage_analysis',
+              '        self._interrupt_if_requested(run_id, interrupt_after, RunStage.ANALYSIS_VALIDATED)',
+              'analysis_outcome',
+          )
+          text = rename_block(
+              text,
+              '            outcome = self._stage_verify',
+              '        self._interrupt_if_requested(run_id, interrupt_after, RunStage.VERIFIED)',
+              'verification_outcome',
+          )
+
+          text = text.replace(
+              'GateEngine[NormalizedQA](gates=(self._university,), context=context)',
+              'GateEngine[NormalizedQA](gates=(cast(QualityGate[NormalizedQA], self._university),), context=context)',
+          )
+          text = text.replace(
+              'GateEngine[NormalizedQA](gates=(self._problem,), context=context)',
+              'GateEngine[NormalizedQA](gates=(cast(QualityGate[NormalizedQA], self._problem),), context=context)',
+          )
+
+          assert 'GateEngine(gates=' not in text
+          assert 'cast(QualityGate[NormalizedQA], self._university)' in text
+          assert 'cast(QualityGate[NormalizedQA], self._problem)' in text
+          assert '            outcome = self._stage_' not in text
+          path.write_text(text, encoding='utf-8')
+          PY
+          ruff format src/college_builder/pipeline/runner.py
+          git diff --check
+      - run: pytest tests/e2e/test_pipeline_resume.py tests/e2e/test_pipeline_report.py -q
+      - run: ruff check src tests
+      - run: mypy src
+      - name: Commit verified patch to feature
+        run: |
+          git config user.name lingyi9909
+          git config user.email zhanhui9909@gmail.com
+          git add src/college_builder/pipeline/runner.py
+          git commit -m 'fix: make Task 14 orchestration types explicit'
+          git push origin HEAD:feature/task14-pipeline-runner
