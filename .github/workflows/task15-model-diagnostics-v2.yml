@@ -1,0 +1,117 @@
+name: Task 15 Copilot Model Diagnostics V2
+
+on:
+  push:
+    branches:
+      - ci/task15-model-diagnostics-v2
+
+permissions:
+  contents: read
+  copilot-requests: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install latest Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Capture CLI help and probe explicit fixed models
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/task15-model-diagnostics
+
+          {
+            echo '=== COPILOT VERSION ==='
+            copilot --version 2>&1 || true
+            echo
+            echo '=== COPILOT HELP ==='
+            copilot help 2>&1 || true
+          } > /tmp/task15-model-diagnostics/help.txt
+
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path('/tmp/task15-model-diagnostics/help.txt')
+          text = path.read_text(encoding='utf-8', errors='replace')
+          token = os.environ.get('GITHUB_TOKEN', '')
+          if token:
+              text = text.replace(token, '[REDACTED_GITHUB_TOKEN]')
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          candidates=(
+            gpt-5-mini
+            gpt-5.4-mini
+            gpt-5.4-nano
+            claude-haiku-4.5
+            gemini-3.8-flash
+            mai-code-1.1-flash
+            gpt-5.3-codex
+            gpt-5.4
+            gpt-5.5
+            gpt-5.6-luna
+            gpt-5.6-sol
+            gpt-5.6-terra
+            gpt-6-astra
+            claude-sonnet-5
+          )
+
+          : > /tmp/task15-model-diagnostics/probes.txt
+          success_count=0
+          for model in "${candidates[@]}"; do
+            echo "MODEL_PROBE_START=$model" | tee -a /tmp/task15-model-diagnostics/probes.txt
+            set +e
+            copilot -p 'Reply with exactly: TASK15_FIXED_MODEL_OK' -s --no-ask-user --model "$model" \
+              > /tmp/model.out 2> /tmp/model.err
+            status=$?
+            set -e
+
+            python - "$model" "$status" <<'PY' >> /tmp/task15-model-diagnostics/probes.txt
+          import os
+          import sys
+          from pathlib import Path
+
+          model = sys.argv[1]
+          status = int(sys.argv[2])
+          out = Path('/tmp/model.out').read_text(encoding='utf-8', errors='replace').strip()
+          err = Path('/tmp/model.err').read_text(encoding='utf-8', errors='replace').strip()
+          token = os.environ.get('GITHUB_TOKEN', '')
+          if token:
+              out = out.replace(token, '[REDACTED_GITHUB_TOKEN]')
+              err = err.replace(token, '[REDACTED_GITHUB_TOKEN]')
+          print(f'MODEL_PROBE_STATUS={model} exit={status}')
+          print('STDOUT=' + out[:500].replace('\n', ' | '))
+          print('STDERR=' + err[:1200].replace('\n', ' | '))
+          print('---')
+          PY
+
+            if [ "$status" -eq 0 ] && grep -qx 'TASK15_FIXED_MODEL_OK' /tmp/model.out; then
+              echo "MODEL_PROBE_PASS=$model" | tee -a /tmp/task15-model-diagnostics/probes.txt
+              success_count=$((success_count + 1))
+              if [ "$success_count" -ge 2 ]; then
+                break
+              fi
+            else
+              echo "MODEL_PROBE_FAIL=$model exit=$status" | tee -a /tmp/task15-model-diagnostics/probes.txt
+            fi
+          done
+
+          echo "MODEL_PROBE_SUCCESS_COUNT=$success_count" | tee -a /tmp/task15-model-diagnostics/probes.txt
+          cat /tmp/task15-model-diagnostics/probes.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: task15-copilot-model-diagnostics-v2
+          path: /tmp/task15-model-diagnostics/
+          if-no-files-found: error
+          retention-days: 30
