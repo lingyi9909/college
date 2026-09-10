@@ -1,0 +1,23 @@
+name: Task 14 Audit RED
+on: [push]
+jobs:
+  red:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a53ecf260c70260d5cf114754adcf6442ca7eb7a
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - run: git rev-parse HEAD
+      - run: |
+          set +e
+          pytest tests/e2e/test_pipeline_report.py::test_pilot_report_distinguishes_stem_from_university tests/e2e/test_pipeline_resume.py::test_resume_report_preserves_usage_from_interrupted_attempt -q
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            echo 'Expected RED but tests passed'
+            exit 1
+          fi
+          exit 0
