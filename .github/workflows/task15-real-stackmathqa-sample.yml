@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ba7056219064c529ea0d7eabd898a901fffdc6e4
+          ref: 3d1c047563d34d3de9bed01200256a50d84fb435
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -67,10 +67,7 @@ jobs:
                           print(f'STREAM_PROGRESS {filename} rows={count}', flush=True)
                       yield record
                   elapsed = time.monotonic() - started
-                  print(
-                      f'STREAM_DONE {filename} rows={count} seconds={elapsed:.1f}',
-                      flush=True,
-                  )
+                  print(f'STREAM_DONE {filename} rows={count} seconds={elapsed:.1f}', flush=True)
 
           started = time.monotonic()
           sample = build_pilot_sample(
@@ -82,6 +79,7 @@ jobs:
           counts = Counter(str(record.metadata['source_site']) for record in sample.records)
           assert sample.manifest.total == 5000
           assert dict(counts) == FIVE_K_QUOTAS
+          assert sample.manifest.sample_sha256 == 'e9d7b957a092114da35dbb839319a08ab555692a8a06863faf2b1980c2a681c5'
 
           payload = sample.manifest.model_dump(mode='json')
           payload['upstream'] = {
@@ -95,8 +93,12 @@ jobs:
           payload['observed_selected_strata'] = dict(counts)
           payload['stream_elapsed_seconds'] = round(elapsed, 3)
           out = Path('task15-real-5k-sample-manifest.json')
-          out.write_text(
-              json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + '\n',
+          out.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + '\n', encoding='utf-8')
+          Path('task15-real-5k-sample.jsonl').write_text(
+              ''.join(
+                  json.dumps(r.model_dump(mode='json'), ensure_ascii=False, sort_keys=True, separators=(',', ':')) + '\n'
+                  for r in sample.records
+              ),
               encoding='utf-8',
           )
           digest = hashlib.sha256(out.read_bytes()).hexdigest()
@@ -121,7 +123,9 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: task15-real-5k-sample-manifest
-          path: task15-real-5k-sample-manifest.json
+          name: task15-real-5k-runtime-sample
+          path: |
+            task15-real-5k-sample-manifest.json
+            task15-real-5k-sample.jsonl
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
