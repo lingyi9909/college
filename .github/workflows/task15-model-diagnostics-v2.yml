@@ -21,7 +21,7 @@ jobs:
       - name: Install latest Copilot CLI
         run: npm install -g @github/copilot
 
-      - name: Capture CLI help and probe explicit fixed models
+      - name: Probe exact models documented by current Copilot CLI reference
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -50,20 +50,15 @@ jobs:
           PY
 
           candidates=(
-            gpt-5-mini
-            gpt-5.4-mini
-            gpt-5.4-nano
-            claude-haiku-4.5
-            gemini-3.8-flash
-            mai-code-1.1-flash
-            gpt-5.3-codex
+            claude-sonnet-4.6
             gpt-5.4
-            gpt-5.5
-            gpt-5.6-luna
-            gpt-5.6-sol
-            gpt-5.6-terra
-            gpt-6-astra
-            claude-sonnet-5
+            claude-haiku-4.5
+            gpt-5.3-codex
+            gemini-3.1-pro-preview
+            gemini-3.5-flash
+            gemini-3.6-flash
+            gemini-3.7-flash
+            mai-code-1-flash
           )
 
           : > /tmp/task15-model-diagnostics/probes.txt
@@ -98,9 +93,6 @@ jobs:
             if [ "$status" -eq 0 ] && grep -qx 'TASK15_FIXED_MODEL_OK' /tmp/model.out; then
               echo "MODEL_PROBE_PASS=$model" | tee -a /tmp/task15-model-diagnostics/probes.txt
               success_count=$((success_count + 1))
-              if [ "$success_count" -ge 2 ]; then
-                break
-              fi
             else
               echo "MODEL_PROBE_FAIL=$model exit=$status" | tee -a /tmp/task15-model-diagnostics/probes.txt
             fi
@@ -111,7 +103,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: task15-copilot-model-diagnostics-v2
+          name: task15-copilot-model-diagnostics-v2-exact
           path: /tmp/task15-model-diagnostics/
           if-no-files-found: error
           retention-days: 30
