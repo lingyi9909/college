@@ -1,0 +1,32 @@
+name: Task 15 Provider Environment Probe
+
+on:
+  push:
+    branches:
+      - ci/task15-provider-env-probe
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check provider configuration presence without exposing values
+        shell: bash
+        env:
+          BASE_SECRET: ${{ secrets.OPENAI_COMPATIBLE_BASE_URL }}
+          KEY_SECRET: ${{ secrets.OPENAI_COMPATIBLE_API_KEY }}
+          MODEL_SECRET: ${{ secrets.OPENAI_COMPATIBLE_MODEL }}
+          BASE_VAR: ${{ vars.OPENAI_COMPATIBLE_BASE_URL }}
+          MODEL_VAR: ${{ vars.OPENAI_COMPATIBLE_MODEL }}
+        run: |
+          set -euo pipefail
+          present() {
+            if [ -n "$1" ]; then printf 'yes'; else printf 'no'; fi
+          }
+          echo "OPENAI_COMPATIBLE_BASE_URL secret present: $(present "$BASE_SECRET")"
+          echo "OPENAI_COMPATIBLE_BASE_URL variable present: $(present "$BASE_VAR")"
+          echo "OPENAI_COMPATIBLE_API_KEY secret present: $(present "$KEY_SECRET")"
+          echo "OPENAI_COMPATIBLE_MODEL secret present: $(present "$MODEL_SECRET")"
+          echo "OPENAI_COMPATIBLE_MODEL variable present: $(present "$MODEL_VAR")"
