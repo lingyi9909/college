@@ -463,7 +463,9 @@ def test_revisionless_source_content_change_creates_new_snapshot_and_run(tmp_pat
     assert "Q1" not in output["text_question"]
 
 
-def test_revisionless_identical_content_keeps_identity_and_reuses_downstream(tmp_path: Path) -> None:
+def test_revisionless_identical_content_keeps_identity_and_reuses_downstream(
+    tmp_path: Path,
+) -> None:
     config = _config()
     workspace = tmp_path / "workspace"
     records = (_record(1, "VALID"),)
@@ -576,3 +578,28 @@ def test_model_and_duplicate_rejects_persist_identity_and_context(tmp_path: Path
     assert duplicate_rejection["prompt_version"] == "not_applicable"
     assert duplicate_rejection["details"]
     assert duplicate_rejection["evidence"][0]["verdict"] == "REJECT"
+
+
+def test_language_reject_persists_deterministic_context(tmp_path: Path) -> None:
+    config = _config()
+    workspace = tmp_path / "language-workspace"
+    payload = _record(1, "VALID").model_dump(mode="json")
+    metadata = payload["metadata"]
+    assert isinstance(metadata, dict)
+    metadata["language"] = "EN"
+    bad_language = RawSourceRecord.model_validate(payload)
+
+    result = _runner(config=config, workspace=workspace).run(
+        adapter=CountingAdapter((bad_language,)),
+        source_config={},
+        output_dir=tmp_path / "language-output",
+    )
+    rejection = _single_rejection(result.run_dir)
+
+    assert rejection["stage"] == "final_validation"
+    assert rejection["reason_code"] == "LANGUAGE_UNRESOLVED"
+    assert rejection["provider"] == "deterministic"
+    assert rejection["model"] == "pipeline_runner_v1"
+    assert rejection["prompt_version"] == "not_applicable"
+    assert rejection["details"]
+    assert rejection["evidence"][0]["reason_code"] == "LANGUAGE_UNRESOLVED"
