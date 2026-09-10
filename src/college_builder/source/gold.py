@@ -17,6 +17,7 @@ from college_builder.domain.source import JsonLike, RawSourceRecord
 from college_builder.source.base import AdapterCheckpoint, SourceDescriptor
 
 NonEmptyStr = Annotated[str, Field(min_length=1)]
+LanguageCode = Annotated[str, Field(pattern=r"^[a-z]{2}$")]
 
 
 class GoldRole(StrEnum):
@@ -52,6 +53,7 @@ class GoldDatasetConfig(BaseModel):
     gold_role: GoldRole
     field_mapping: GoldFieldMapping
     revision: NonEmptyStr | None = None
+    language: LanguageCode | None = None
     license_metadata: dict[str, JsonLike] = Field(default_factory=dict)
 
 
@@ -177,6 +179,8 @@ class GoldDatasetAdapter:
             source_url = self._mapped_nonempty_text(row, mapping.source_url)
 
         metadata = gold_role_metadata(config.gold_role)
+        if config.language is not None:
+            metadata["language"] = config.language
         if mapping.institution is not None:
             metadata["institution"] = self._mapped_text(row, mapping.institution)
         if mapping.textbook is not None:
