@@ -1,0 +1,43 @@
+name: Task 15 Fixed Copilot Model Access
+
+on:
+  push:
+    branches:
+      - ci/task15-fixed-model-access
+
+permissions:
+  contents: read
+  copilot-requests: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install -g @github/copilot
+      - name: Find first fixed low-cost-capability model actually enabled for this token
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          chosen=''
+          for model in gpt-5.4-nano gpt-5-mini claude-haiku-4.5 gpt-5.4; do
+            echo "MODEL_PROBE_START=$model"
+            set +e
+            copilot -p 'Reply with exactly: TASK15_FIXED_MODEL_OK' -s --no-ask-user --model "$model" \
+              > /tmp/model.out 2> /tmp/model.err
+            status=$?
+            set -e
+            if [ "$status" -eq 0 ] && grep -q '^TASK15_FIXED_MODEL_OK$' /tmp/model.out; then
+              echo "MODEL_PROBE_PASS=$model"
+              chosen="$model"
+              break
+            fi
+            echo "MODEL_PROBE_FAIL=$model exit=$status"
+          done
+          test -n "$chosen"
+          echo "TASK15_FIXED_MODEL=$chosen"
