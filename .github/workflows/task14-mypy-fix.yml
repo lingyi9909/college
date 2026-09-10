@@ -1,0 +1,75 @@
+name: Task 14 MyPy Fix
+on:
+  push:
+    branches: [verification/task14-mypy-fix]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/task14-pipeline-runner
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - name: Apply type-only edits
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/college_builder/pipeline/runner.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('GateEngine(gates=', 'GateEngine[NormalizedQA](gates=')
+
+          def rename_block(text: str, assignment: str, end_marker: str, replacement: str) -> str:
+              start = text.index(assignment)
+              end = text.index(end_marker, start)
+              block = text[start:end]
+              assert 'outcome' in block
+              block = block.replace('outcome', replacement)
+              return text[:start] + block + text[end:]
+
+          text = rename_block(
+              text,
+              '            outcome = self._stage_classification',
+              '        self._interrupt_if_requested(run_id, interrupt_after, RunStage.CLASSIFIED)',
+              'classification_outcome',
+          )
+          text = rename_block(
+              text,
+              '            outcome = self._stage_answer',
+              '        self._interrupt_if_requested(run_id, interrupt_after, RunStage.ANSWER_VALIDATED)',
+              'answer_outcome',
+          )
+          text = rename_block(
+              text,
+              '            outcome = self._stage_analysis',
+              '        self._interrupt_if_requested(run_id, interrupt_after, RunStage.ANALYSIS_VALIDATED)',
+              'analysis_outcome',
+          )
+          text = rename_block(
+              text,
+              '            outcome = self._stage_verify',
+              '        self._interrupt_if_requested(run_id, interrupt_after, RunStage.VERIFIED)',
+              'verification_outcome',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+          ruff format src/college_builder/pipeline/runner.py
+          git diff --check
+          git diff -- src/college_builder/pipeline/runner.py
+      - run: pytest tests/e2e/test_pipeline_resume.py tests/e2e/test_pipeline_report.py -q
+      - run: ruff check src tests
+      - run: mypy src
+      - name: Commit verified type fix to feature
+        run: |
+          git config user.name lingyi9909
+          git config user.email zhanhui9909@gmail.com
+          git add src/college_builder/pipeline/runner.py
+          git commit -m 'fix: make Task 14 orchestration type explicit'
+          git push origin HEAD:feature/task14-pipeline-runner
