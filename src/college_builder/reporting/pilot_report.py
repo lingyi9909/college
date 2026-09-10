@@ -21,6 +21,8 @@ class RecordAudit(_FrozenModel):
     source_dataset: str = Field(min_length=1)
     subject: str = Field(min_length=1)
     normalized: bool = False
+    stem: bool | None = None
+    university: bool | None = None
     university_stem: bool = False
     problem: bool = False
     answer_valid: bool = False
@@ -88,8 +90,13 @@ def build_pilot_report(
     funnel = {
         "raw": raw_count,
         "normalized": sum(row.normalized for row in rows),
-        "stem": sum(row.university_stem for row in rows),
-        "university": sum(row.university_stem for row in rows),
+        "stem": sum(
+            row.stem if row.stem is not None else row.university_stem for row in rows
+        ),
+        "university": sum(
+            row.university if row.university is not None else row.university_stem
+            for row in rows
+        ),
         "problem": sum(row.problem for row in rows),
         "answer_valid": sum(row.answer_valid for row in rows),
         "analysis_valid": sum(row.analysis_valid for row in rows),
