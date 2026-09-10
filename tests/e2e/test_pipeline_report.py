@@ -153,6 +153,97 @@ def test_pilot_report_distinguishes_stem_from_university() -> None:
     assert report.funnel["university"] == 1
 
 
+def test_source_and_subject_distributions_include_the_complete_funnel() -> None:
+    audits = (
+        RecordAudit(
+            record_id="accepted",
+            source_dataset="source-a",
+            subject="MATHEMATICS",
+            normalized=True,
+            stem=True,
+            university=True,
+            university_stem=True,
+            problem=True,
+            answer_valid=True,
+            analysis_valid=True,
+            alignment_pass=True,
+            after_dedup=True,
+            accepted=True,
+        ),
+        RecordAudit(
+            record_id="university-reject",
+            source_dataset="source-a",
+            subject="MATHEMATICS",
+            normalized=True,
+            stem=True,
+            university=False,
+            university_stem=False,
+            reject_reason="NOT_UNIVERSITY_LEVEL",
+        ),
+        RecordAudit(
+            record_id="problem-reject",
+            source_dataset="source-a",
+            subject="PHYSICS",
+            normalized=True,
+            stem=True,
+            university=True,
+            university_stem=True,
+            problem=False,
+            reject_reason="NOT_PROBLEM",
+        ),
+        RecordAudit(
+            record_id="integrity-reject",
+            source_dataset="source-b",
+            subject="UNKNOWN",
+            reject_reason="SOURCE_CORRUPTED",
+        ),
+    )
+
+    report = build_pilot_report(
+        run_id="run-split-funnel",
+        audits=audits,
+        provider_usage=ProviderUsage(),
+        wall_time_seconds=0.0,
+    )
+
+    assert report.source_distribution["source-a"].model_dump(mode="json") == {
+        "raw": 3,
+        "normalized": 3,
+        "stem": 3,
+        "university": 2,
+        "problem": 1,
+        "answer_valid": 1,
+        "analysis_valid": 1,
+        "alignment_pass": 1,
+        "after_dedup": 1,
+        "final_accepted": 1,
+    }
+    assert report.subject_distribution["MATHEMATICS"].model_dump(mode="json") == {
+        "raw": 2,
+        "normalized": 2,
+        "stem": 2,
+        "university": 1,
+        "problem": 1,
+        "answer_valid": 1,
+        "analysis_valid": 1,
+        "alignment_pass": 1,
+        "after_dedup": 1,
+        "final_accepted": 1,
+    }
+    assert report.subject_distribution["PHYSICS"].model_dump(mode="json") == {
+        "raw": 1,
+        "normalized": 1,
+        "stem": 1,
+        "university": 1,
+        "problem": 0,
+        "answer_valid": 0,
+        "analysis_valid": 0,
+        "alignment_pass": 0,
+        "after_dedup": 0,
+        "final_accepted": 0,
+    }
+
+
 def test_cli_exposes_run_resume_report_and_config_validate(tmp_path: Path) -> None:
     runner = CliRunner()
     help_result = runner.invoke(app, ["--help"])

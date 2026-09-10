@@ -8,8 +8,11 @@ import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from college_builder.config import PipelineConfig
 from college_builder.domain.evidence import GateVerdict
@@ -72,6 +75,23 @@ class PipelineRunResult:
     report_path: Path
     accepted_count: int
     rejected_count: int
+
+
+class RejectedRecord(BaseModel):
+    """Durable terminal rejection fact used by resume and reporting."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_record_id: str = Field(min_length=1)
+    stage: str = Field(min_length=1)
+    reason_code: str = Field(min_length=1)
+    details: dict[str, JsonValue] = Field(default_factory=dict)
+    evidence: tuple[GateResultEvidence, ...] = ()
+    pipeline_version: str = Field(min_length=1)
+    config_version: str = Field(min_length=1)
+    prompt_version: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
 
 
 class PipelineInterrupted(RuntimeError):
@@ -420,8 +440,7 @@ class PipelineRunner:
         descriptors = tuple(adapter.discover(source_config))
         if not descriptors:
             raise ValueError("source adapter discovered no inputs")
-        source_snapshot_hash = _source_snapshot_hash(descriptors)
-        raw_records = self._load_or_acquire(adapter, descriptors, source_snapshot_hash)
+        source_snapshot_hash, raw_records = self._resolve_source_snapshot(adapter, descriptors)
         config_hash = _hash_json(self.config.model_dump(mode="json"))
         run_id = _run_id(source_snapshot_hash, config_hash, self.config.pipeline_version)
         run_dir = self.workspace / "runs" / run_id
@@ -521,9 +540,20 @@ class PipelineRunner:
             current = state.current_stage(run_id, raw.record_id)
             saved_audit = self._load_audit(run_dir, raw.record_id)
             audits[raw.record_id] = saved_audit or _audit_facts(raw)
-            if current is RunStage.REJECTED:
+            saved_rejection = self._load_rejection(run_dir, raw.record_id)
+            if saved_rejection is not None:
+                rejection_fp = _hash_json(saved_rejection.model_dump(mode="json"))
+                if current is not RunStage.REJECTED:
+                    state.advance(run_id, raw.record_id, RunStage.REJECTED, rejection_fp)
                 rejected.add(raw.record_id)
+                audits[raw.record_id]["reject_reason"] = saved_rejection.reason_code
+                audits[raw.record_id]["accepted"] = False
+                self._save_audit(run_dir, raw.record_id, audits[raw.record_id])
                 continue
+            if current is RunStage.REJECTED:
+                raise RuntimeError(
+                    f"rejected record {raw.record_id} is missing durable rejection evidence"
+                )
             if current is RunStage.ACCEPTED:
                 terminal_accepted[raw.record_id] = self._load_terminal_ir(run_dir, raw.record_id)
                 continue
@@ -547,6 +577,7 @@ class PipelineRunner:
                     integrity.reason_code,
                     rejected,
                     audits,
+                    gate_evidence=(integrity,),
                 )
                 continue
 
@@ -571,15 +602,34 @@ class PipelineRunner:
                 or classification_outcome.classification is None
             ):
                 reason = classification_outcome.reject_reason or "UNIVERSITY_LEVEL_UNCERTAIN"
+                university_evidence = (
+                    classification_outcome.evidence[0] if classification_outcome.evidence else None
+                )
                 university_label = (
-                    _decision_label(classification_outcome.evidence[0])
-                    if classification_outcome.evidence
+                    _decision_label(university_evidence)
+                    if university_evidence is not None
                     else None
                 )
-                if university_label == "NON_UNIVERSITY_STEM":
+                if (
+                    university_evidence is not None
+                    and university_evidence.verdict is not GateVerdict.REJECT
+                ):
+                    audits[raw.record_id]["stem"] = True
+                    audits[raw.record_id]["university"] = True
+                    audits[raw.record_id]["university_stem"] = True
+                elif university_label == "NON_UNIVERSITY_STEM":
                     audits[raw.record_id]["stem"] = True
                     audits[raw.record_id]["university"] = False
-                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)
+                self._mark_rejected(
+                    state,
+                    run_id,
+                    run_dir,
+                    raw.record_id,
+                    reason,
+                    rejected,
+                    audits,
+                    gate_evidence=classification_outcome.evidence,
+                )
                 continue
             classifications[raw.record_id] = classification_outcome.classification
             fp = self._classification_fingerprint(candidate)
@@ -608,7 +658,16 @@ class PipelineRunner:
             evidence[raw.record_id].extend(answer_outcome.evidence)
             if answer_outcome.reject_reason is not None or answer_outcome.answer is None:
                 reason = answer_outcome.reject_reason or "ANSWER_NOT_EXTRACTABLE"
-                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)
+                self._mark_rejected(
+                    state,
+                    run_id,
+                    run_dir,
+                    raw.record_id,
+                    reason,
+                    rejected,
+                    audits,
+                    gate_evidence=answer_outcome.evidence,
+                )
                 continue
             answers[raw.record_id] = answer_outcome.answer
             fp = _hash_json(
@@ -636,7 +695,16 @@ class PipelineRunner:
             evidence[raw.record_id].extend(analysis_outcome.evidence)
             if analysis_outcome.reject_reason is not None or analysis_outcome.analysis is None:
                 reason = analysis_outcome.reject_reason or "ANALYSIS_UNCERTAIN"
-                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)
+                self._mark_rejected(
+                    state,
+                    run_id,
+                    run_dir,
+                    raw.record_id,
+                    reason,
+                    rejected,
+                    audits,
+                    gate_evidence=analysis_outcome.evidence,
+                )
                 continue
             analyses[raw.record_id] = analysis_outcome.analysis
             fp = self._analysis_fingerprint(candidate)
@@ -670,7 +738,17 @@ class PipelineRunner:
             candidate = normalized[raw.record_id]
             if candidate.record_id in dropped_normalized:
                 self._mark_rejected(
-                    state, run_id, run_dir, raw.record_id, "DUPLICATE", rejected, audits
+                    state,
+                    run_id,
+                    run_dir,
+                    raw.record_id,
+                    "DUPLICATE",
+                    rejected,
+                    audits,
+                    details={
+                        "record_id": raw.record_id,
+                        "exact_hash": ExactDeduper().fingerprint(candidate),
+                    },
                 )
                 continue
             fp = _hash_json({"exact_hash": ExactDeduper().fingerprint(candidate)})
@@ -702,6 +780,7 @@ class PipelineRunner:
                     verification_outcome.reject_reason,
                     rejected,
                     audits,
+                    gate_evidence=verification_outcome.evidence,
                 )
                 continue
             if current is RunStage.EARLY_DEDUPED:
@@ -734,7 +813,17 @@ class PipelineRunner:
             candidate = normalized[raw.record_id]
             if candidate.record_id in final_dropped:
                 self._mark_rejected(
-                    state, run_id, run_dir, raw.record_id, "DUPLICATE", rejected, audits
+                    state,
+                    run_id,
+                    run_dir,
+                    raw.record_id,
+                    "DUPLICATE",
+                    rejected,
+                    audits,
+                    details={
+                        "record_id": raw.record_id,
+                        "exact_hash": ExactDeduper().fingerprint(candidate),
+                    },
                 )
                 continue
             current = state.current_stage(run_id, raw.record_id)
@@ -761,7 +850,19 @@ class PipelineRunner:
                     if str(exc) == "LANGUAGE_UNRESOLVED"
                     else "SCHEMA_VALIDATION_FAILED"
                 )
-                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)
+                self._mark_rejected(
+                    state,
+                    run_id,
+                    run_dir,
+                    raw.record_id,
+                    reason,
+                    rejected,
+                    audits,
+                    details={
+                        "record_id": raw.record_id,
+                        "validation_error": str(exc),
+                    },
+                )
                 continue
 
             accepted_fp = _hash_json({"ir": ir.model_dump(mode="json")})
@@ -787,6 +888,14 @@ class PipelineRunner:
             (ExportRecord(ir=ir, stage=RunStage.ACCEPTED) for ir in accepted_irs),
             output_dir,
         )
+        for record_id in rejected:
+            rejection = self._load_rejection(run_dir, record_id)
+            if rejection is None:
+                raise RuntimeError(
+                    f"rejected record {record_id} is missing durable rejection evidence"
+                )
+            audits[record_id]["reject_reason"] = rejection.reason_code
+            audits[record_id]["accepted"] = False
         audit_rows = tuple(RecordAudit.model_validate(audits[row.record_id]) for row in raw_records)
         provider_usage = _merge_provider_usage(
             usage_prior,
@@ -1031,6 +1140,23 @@ class PipelineRunner:
             ),
         )
 
+    def _resolve_source_snapshot(
+        self,
+        adapter: SourceAdapter,
+        descriptors: tuple[SourceDescriptor, ...],
+    ) -> tuple[str, tuple[RawSourceRecord, ...]]:
+        if all(_has_trusted_source_revision(descriptor) for descriptor in descriptors):
+            source_snapshot_hash = _source_snapshot_hash(descriptors)
+            return (
+                source_snapshot_hash,
+                self._load_or_acquire(adapter, descriptors, source_snapshot_hash),
+            )
+
+        records = self._acquire_records(adapter, descriptors)
+        source_snapshot_hash = _source_content_snapshot_hash(descriptors, records)
+        self._store_source_snapshot(source_snapshot_hash, records)
+        return source_snapshot_hash, records
+
     def _load_or_acquire(
         self,
         adapter: SourceAdapter,
@@ -1040,6 +1166,15 @@ class PipelineRunner:
         cache_path = self._source_cache_path(source_snapshot_hash)
         if cache_path.is_file():
             return self._load_source_cache(source_snapshot_hash)
+        records = self._acquire_records(adapter, descriptors)
+        self._store_source_snapshot(source_snapshot_hash, records)
+        return records
+
+    def _acquire_records(
+        self,
+        adapter: SourceAdapter,
+        descriptors: tuple[SourceDescriptor, ...],
+    ) -> tuple[RawSourceRecord, ...]:
         records: list[RawSourceRecord] = []
         seen: set[str] = set()
         for descriptor in descriptors:
@@ -1050,19 +1185,19 @@ class PipelineRunner:
                 records.append(record)
         if not records:
             raise ValueError("source acquisition returned no records")
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = "".join(
-            json.dumps(
-                record.model_dump(mode="json"),
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            + "\n"
-            for record in records
-        )
-        _atomic_write_text(cache_path, payload)
         return tuple(records)
+
+    def _store_source_snapshot(
+        self, source_snapshot_hash: str, records: tuple[RawSourceRecord, ...]
+    ) -> None:
+        cache_path = self._source_cache_path(source_snapshot_hash)
+        payload = _serialize_source_records(records)
+        if cache_path.is_file():
+            if cache_path.read_text(encoding="utf-8") != payload:
+                raise RuntimeError("source snapshot hash collision or cache corruption")
+            return
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_text(cache_path, payload)
 
     def _load_source_cache(self, source_snapshot_hash: str) -> tuple[RawSourceRecord, ...]:
         path = self._source_cache_path(source_snapshot_hash)
@@ -1122,14 +1257,85 @@ class PipelineRunner:
         reason: str,
         rejected: set[str],
         audits: dict[str, dict[str, Any]],
+        *,
+        gate_evidence: tuple[GateResultEvidence, ...] = (),
+        details: dict[str, JsonValue] | None = None,
     ) -> None:
         current = state.current_stage(run_id, record_id)
-        if current is not RunStage.REJECTED:
-            state.advance(run_id, record_id, RunStage.REJECTED, _hash_json({"reason": reason}))
+        if current is None or current is RunStage.REJECTED:
+            raise RuntimeError("rejection requires a completed non-terminal pipeline stage")
+        stage = _reject_stage(current)
+        identity_evidence = _reject_identity_evidence(gate_evidence)
+        resolved_details = dict(details or {})
+        if not resolved_details and identity_evidence is not None:
+            resolved_details = dict(identity_evidence.evidence_payload)
+        if not resolved_details:
+            resolved_details = {
+                "record_id": record_id,
+                "state_before_reject": current.value,
+                "reason_code": reason,
+            }
+        if identity_evidence is None:
+            identity_evidence = GateResultEvidence(
+                gate_name=f"pipeline_{stage}",
+                verdict=GateVerdict.REJECT,
+                score=0.0,
+                provider="deterministic",
+                model="pipeline_runner_v1",
+                prompt_version="not_applicable",
+                config_version=self.config.config_version,
+                reason_code=reason,
+                evidence_payload=resolved_details,
+                timestamp=datetime.now(UTC),
+            )
+            gate_evidence = (identity_evidence,)
+        rejection = RejectedRecord(
+            source_record_id=record_id,
+            stage=stage,
+            reason_code=reason,
+            details=resolved_details,
+            evidence=gate_evidence,
+            pipeline_version=self.config.pipeline_version,
+            config_version=self.config.config_version,
+            prompt_version=identity_evidence.prompt_version,
+            provider=identity_evidence.provider,
+            model=identity_evidence.model,
+        )
+        self._write_rejection(run_dir, record_id, rejection)
+        rejection_fp = _hash_json(rejection.model_dump(mode="json"))
+        state.advance(run_id, record_id, RunStage.REJECTED, rejection_fp)
         rejected.add(record_id)
-        audits[record_id]["reject_reason"] = reason
+        audits[record_id]["reject_reason"] = rejection.reason_code
         audits[record_id]["accepted"] = False
         self._save_audit(run_dir, record_id, audits[record_id])
+
+    def _rejection_path(self, run_dir: Path, record_id: str) -> Path:
+        safe_id = hashlib.sha256(record_id.encode("utf-8")).hexdigest()
+        return run_dir / "rejected" / f"{safe_id}.json"
+
+    def _write_rejection(self, run_dir: Path, record_id: str, rejection: RejectedRecord) -> None:
+        path = self._rejection_path(run_dir, record_id)
+        payload = (
+            json.dumps(
+                rejection.model_dump(mode="json"),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        if path.is_file():
+            if path.read_text(encoding="utf-8") != payload:
+                raise RuntimeError(f"rejection evidence changed for terminal record {record_id}")
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_text(path, payload)
+
+    def _load_rejection(self, run_dir: Path, record_id: str) -> RejectedRecord | None:
+        path = self._rejection_path(run_dir, record_id)
+        if not path.is_file():
+            return None
+        return RejectedRecord.model_validate_json(path.read_text(encoding="utf-8"))
 
     def _stage_artifact_path(self, run_dir: Path, record_id: str, stage: str) -> Path:
         safe_id = hashlib.sha256(record_id.encode("utf-8")).hexdigest()
@@ -1251,10 +1457,44 @@ def _merge_provider_usage(left: ProviderUsage, right: ProviderUsage) -> Provider
     )
 
 
+def _has_trusted_source_revision(descriptor: SourceDescriptor) -> bool:
+    revision = descriptor.source_revision
+    return isinstance(revision, str) and bool(revision.strip())
+
+
 def _source_snapshot_hash(descriptors: tuple[SourceDescriptor, ...]) -> str:
     values = [descriptor.model_dump(mode="json") for descriptor in descriptors]
     values.sort(key=lambda value: json.dumps(value, sort_keys=True, separators=(",", ":")))
     return _hash_json(values)
+
+
+def _source_content_snapshot_hash(
+    descriptors: tuple[SourceDescriptor, ...],
+    records: tuple[RawSourceRecord, ...],
+) -> str:
+    descriptor_values = [descriptor.model_dump(mode="json") for descriptor in descriptors]
+    descriptor_values.sort(
+        key=lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"))
+    )
+    return _hash_json(
+        {
+            "descriptors": descriptor_values,
+            "records": [record.model_dump(mode="json") for record in records],
+        }
+    )
+
+
+def _serialize_source_records(records: tuple[RawSourceRecord, ...]) -> str:
+    return "".join(
+        json.dumps(
+            record.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+        for record in records
+    )
 
 
 def _run_id(source_snapshot_hash: str, config_hash: str, pipeline_version: str) -> str:
@@ -1298,11 +1538,50 @@ def _raw_identity(raw: RawSourceRecord) -> dict[str, str]:
     }
 
 
+def _subject_from_raw(raw: RawSourceRecord) -> str:
+    metadata = raw.model_dump(mode="json").get("metadata")
+    if not isinstance(metadata, dict):
+        return "UNKNOWN"
+    value = metadata.get("discipline")
+    if not isinstance(value, str):
+        return "UNKNOWN"
+    try:
+        return Discipline(value).value
+    except ValueError:
+        return "UNKNOWN"
+
+
+def _reject_stage(current: RunStage) -> str:
+    stages = {
+        RunStage.ACQUIRED: "integrity",
+        RunStage.NORMALIZED: "classification",
+        RunStage.CLASSIFIED: "answer",
+        RunStage.ANSWER_VALIDATED: "analysis",
+        RunStage.ANALYSIS_VALIDATED: "early_dedup",
+        RunStage.EARLY_DEDUPED: "verification",
+        RunStage.VERIFIED: "final_dedup",
+        RunStage.FINAL_DEDUPED: "final_validation",
+    }
+    stage = stages.get(current)
+    if stage is None:
+        raise RuntimeError(f"unsupported rejection state: {current.value}")
+    return stage
+
+
+def _reject_identity_evidence(
+    evidence: tuple[GateResultEvidence, ...],
+) -> GateResultEvidence | None:
+    for item in reversed(evidence):
+        if item.verdict is GateVerdict.REJECT:
+            return item
+    return evidence[-1] if evidence else None
+
+
 def _audit_facts(raw: RawSourceRecord) -> dict[str, Any]:
     return {
         "record_id": raw.record_id,
         "source_dataset": raw.source_dataset,
-        "subject": "UNKNOWN",
+        "subject": _subject_from_raw(raw),
         "normalized": False,
         "stem": False,
         "university": False,

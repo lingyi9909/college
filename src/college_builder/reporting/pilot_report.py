@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -48,8 +48,24 @@ class ProviderUsage(_FrozenModel):
 
 
 class DistributionCount(_FrozenModel):
+    """The same complete funnel as the global report for one distribution bucket."""
+
     raw: int = Field(ge=0)
-    accepted: int = Field(ge=0)
+    normalized: int = Field(ge=0)
+    stem: int = Field(ge=0)
+    university: int = Field(ge=0)
+    problem: int = Field(ge=0)
+    answer_valid: int = Field(ge=0)
+    analysis_valid: int = Field(ge=0)
+    alignment_pass: int = Field(ge=0)
+    after_dedup: int = Field(ge=0)
+    final_accepted: int = Field(ge=0)
+
+    @property
+    def accepted(self) -> int:
+        """Backward-compatible accessor for the terminal funnel count."""
+
+        return self.final_accepted
 
 
 class PilotReport(_FrozenModel):
@@ -85,22 +101,9 @@ def build_pilot_report(
     """Aggregate a complete, deterministic funnel from per-record audit facts."""
 
     rows = tuple(audits)
-    raw_count = len(rows)
-    accepted_count = sum(row.accepted for row in rows)
-    funnel = {
-        "raw": raw_count,
-        "normalized": sum(row.normalized for row in rows),
-        "stem": sum(row.stem if row.stem is not None else row.university_stem for row in rows),
-        "university": sum(
-            row.university if row.university is not None else row.university_stem for row in rows
-        ),
-        "problem": sum(row.problem for row in rows),
-        "answer_valid": sum(row.answer_valid for row in rows),
-        "analysis_valid": sum(row.analysis_valid for row in rows),
-        "alignment_pass": sum(row.alignment_pass for row in rows),
-        "after_dedup": sum(row.after_dedup for row in rows),
-        "final_accepted": accepted_count,
-    }
+    funnel = _funnel(rows)
+    raw_count = funnel["raw"]
+    accepted_count = funnel["final_accepted"]
     reject_reasons = Counter(row.reject_reason for row in rows if row.reject_reason is not None)
     total_cache = provider_usage.cache_hits + provider_usage.cache_misses
 
@@ -145,20 +148,34 @@ def load_pilot_report(path: Path) -> PilotReport:
     return PilotReport.model_validate_json(Path(path).read_text(encoding="utf-8"))
 
 
+def _funnel(rows: tuple[RecordAudit, ...]) -> dict[str, int]:
+    return {
+        "raw": len(rows),
+        "normalized": sum(row.normalized for row in rows),
+        "stem": sum(row.stem if row.stem is not None else row.university_stem for row in rows),
+        "university": sum(
+            row.university if row.university is not None else row.university_stem for row in rows
+        ),
+        "problem": sum(row.problem for row in rows),
+        "answer_valid": sum(row.answer_valid for row in rows),
+        "analysis_valid": sum(row.analysis_valid for row in rows),
+        "alignment_pass": sum(row.alignment_pass for row in rows),
+        "after_dedup": sum(row.after_dedup for row in rows),
+        "final_accepted": sum(row.accepted for row in rows),
+    }
+
+
 def _distribution(
     rows: tuple[RecordAudit, ...],
     attribute: str,
 ) -> dict[str, DistributionCount]:
-    raw_counts: Counter[str] = Counter()
-    accepted_counts: Counter[str] = Counter()
+    buckets: defaultdict[str, list[RecordAudit]] = defaultdict(list)
     for row in rows:
         value = getattr(row, attribute)
         if not isinstance(value, str):
             raise TypeError(f"{attribute} must resolve to a string")
-        raw_counts[value] += 1
-        if row.accepted:
-            accepted_counts[value] += 1
+        buckets[value].append(row)
     return {
-        key: DistributionCount(raw=raw_counts[key], accepted=accepted_counts[key])
-        for key in sorted(raw_counts)
+        key: DistributionCount.model_validate(_funnel(tuple(bucket_rows)))
+        for key, bucket_rows in sorted(buckets.items())
     }
