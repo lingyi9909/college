@@ -64,7 +64,12 @@ class _LocalJsonlAdapter:
 
 def _provider(config: ProviderConfig) -> StructuredModelProvider:
     if config.name == "openai_compatible":
-        return OpenAICompatibleStructuredModelProvider(model=config.model)
+        return OpenAICompatibleStructuredModelProvider(
+            model=config.model,
+            timeout_seconds=config.timeout_seconds,
+            max_attempts=config.max_attempts,
+            retry_backoff_seconds=config.retry_backoff_seconds,
+        )
     raise ValueError("the fake provider is test-only; CLI run/resume requires openai_compatible")
 
 
