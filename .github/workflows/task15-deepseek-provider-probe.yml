@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: cf49a9815f14f1b1b6619fa4c5e8018e133bd5b6
+          ref: 934be6daba7598ab735a4d6d854a17ab3cb60b5e
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -181,7 +181,7 @@ jobs:
           report_path = run_dirs[0] / 'run_report.json'
           report = json.loads(report_path.read_text())
           summary = {
-              'feature_sha': 'cf49a9815f14f1b1b6619fa4c5e8018e133bd5b6',
+              'feature_sha': '934be6daba7598ab735a4d6d854a17ab3cb60b5e',
               'raw_count': report['raw_count'],
               'accepted_count': report['accepted_count'],
               'rejected_count': report['rejected_count'],
