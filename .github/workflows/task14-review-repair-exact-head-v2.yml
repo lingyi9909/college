@@ -1,0 +1,136 @@
+name: Task 14 Reviewer Repair Exact HEAD V2
+
+on:
+  push:
+    branches:
+      - verification/task14-review-repair-exact-head-v2
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact Task 14 repaired develop HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: 9fa8ae2bc120a77def29d76e4906233ed6855bd8
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - name: Show exact HEAD
+        run: git rev-parse HEAD
+      - name: Independent Task 14 repair contracts
+        shell: bash
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import json
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+
+          from college_builder.pipeline.runner import PipelineRunner
+          from college_builder.reporting.pilot_report import ProviderUsage, RecordAudit, build_pilot_report
+
+          failures = []
+
+          # Blocker 1: complete funnel must be present in every source/subject bucket.
+          audits = (
+              RecordAudit(record_id="1", source_dataset="a", subject="MATHEMATICS", normalized=True, stem=True, university=True, university_stem=True, problem=True, answer_valid=True, analysis_valid=True, alignment_pass=True, after_dedup=True, correctness_pass=True, accepted=True),
+              RecordAudit(record_id="2", source_dataset="a", subject="MATHEMATICS", normalized=True, stem=True, university=False, reject_reason="NOT_UNIVERSITY_LEVEL"),
+              RecordAudit(record_id="3", source_dataset="a", subject="PHYSICS", normalized=True, stem=True, university=True, university_stem=True, problem=False, reject_reason="NOT_PROBLEM"),
+          )
+          report = build_pilot_report(run_id="run-contract", audits=audits, provider_usage=ProviderUsage(), wall_time_seconds=0.0)
+          required = {"raw", "normalized", "stem", "university", "problem", "answer_valid", "analysis_valid", "alignment_pass", "after_dedup", "final_accepted"}
+          for label, distribution in (("source", report.source_distribution), ("subject", report.subject_distribution)):
+              for key, bucket in distribution.items():
+                  present = set(bucket.model_dump(mode="json"))
+                  if not required <= present:
+                      failures.append(f"{label} split {key!r} lacks complete funnel: {sorted(present)}")
+          source_a = report.source_distribution["a"].model_dump(mode="json")
+          expected_source_a = {"raw": 3, "normalized": 3, "stem": 3, "university": 2, "problem": 1, "answer_valid": 1, "analysis_valid": 1, "alignment_pass": 1, "after_dedup": 1, "final_accepted": 1}
+          if source_a != expected_source_a:
+              failures.append(f"source funnel counts wrong: {source_a}")
+
+          spec = importlib.util.spec_from_file_location("task14_fixture", "tests/e2e/test_pipeline_resume.py")
+          fixture = importlib.util.module_from_spec(spec)
+          assert spec and spec.loader
+          spec.loader.exec_module(fixture)
+
+          # Blocker 2a: revisionless content changes must produce a new snapshot/run.
+          with TemporaryDirectory() as td:
+              root = Path(td)
+              workspace = root / "workspace"
+              config = fixture._config()
+              a1 = fixture.CountingAdapter((fixture._record(1, "VALID", question_override="Q1: Calculate 1 + 1"),), revision=None)
+              r1 = fixture._runner(config=config, workspace=workspace).run(adapter=a1, source_config={}, output_dir=root / "out1")
+              a2 = fixture.CountingAdapter((fixture._record(1, "VALID", question_override="Q2: Calculate 2 + 2"),), revision=None)
+              r2 = fixture._runner(config=config, workspace=workspace).run(adapter=a2, source_config={}, output_dir=root / "out2")
+              out2 = (root / "out2" / "questions.jsonl").read_text(encoding="utf-8")
+              if a2.acquire_calls != 1 or r1.run_id == r2.run_id or "Q2" not in out2 or "Q1" in out2:
+                  failures.append("revisionless changed source was not content-addressed")
+
+          # Blocker 2b: a symbolic/mutable revision such as 'main' is not an immutable snapshot.
+          # The approved SourceDescriptor accepts arbitrary revision strings and the HF adapter can use branch names,
+          # so such a revision must not be treated as trusted immutable identity merely because it is non-empty.
+          with TemporaryDirectory() as td:
+              root = Path(td)
+              workspace = root / "workspace"
+              config = fixture._config()
+              a1 = fixture.CountingAdapter((fixture._record(1, "VALID", question_override="MAIN-Q1: Calculate 1 + 1"),), revision="main")
+              r1 = fixture._runner(config=config, workspace=workspace).run(adapter=a1, source_config={}, output_dir=root / "out1")
+              a2 = fixture.CountingAdapter((fixture._record(1, "VALID", question_override="MAIN-Q2: Calculate 2 + 2"),), revision="main")
+              r2 = fixture._runner(config=config, workspace=workspace).run(adapter=a2, source_config={}, output_dir=root / "out2")
+              out2 = (root / "out2" / "questions.jsonl").read_text(encoding="utf-8")
+              if a2.acquire_calls == 0 or r1.run_id == r2.run_id or "MAIN-Q2" not in out2:
+                  failures.append("mutable symbolic source revision 'main' was incorrectly trusted as immutable snapshot identity")
+
+          # Blocker 3: rejected records must durably preserve complete rejection identity/evidence.
+          with TemporaryDirectory() as td:
+              root = Path(td)
+              workspace = root / "workspace"
+              config = fixture._config()
+              corrupt = fixture._record(4, "VALID").model_copy(update={"raw_sha256": "f" * 64})
+              result = fixture._runner(config=config, workspace=workspace).run(adapter=fixture.CountingAdapter((corrupt,), revision="corrupt-v1"), source_config={}, output_dir=root / "out")
+              paths = list((result.run_dir / "rejected").glob("*.json"))
+              if len(paths) != 1:
+                  failures.append(f"expected one durable rejection artifact, found {len(paths)}")
+              else:
+                  rejection = json.loads(paths[0].read_text(encoding="utf-8"))
+                  required_keys = {"source_record_id", "stage", "reason_code", "details", "evidence", "pipeline_version", "config_version", "prompt_version", "provider", "model"}
+                  if not required_keys <= set(rejection):
+                      failures.append(f"rejection artifact missing keys: {sorted(required_keys - set(rejection))}")
+                  evidence = rejection.get("evidence")
+                  if rejection.get("stage") != "integrity" or rejection.get("reason_code") != "SOURCE_CORRUPTED" or not isinstance(evidence, list) or not evidence or evidence[0].get("gate_name") != "gate_0_integrity_provenance":
+                      failures.append(f"Gate 0 rejection evidence/identity incorrect: {rejection}")
+
+          if failures:
+              print("TASK14_REPAIR_ACCEPTANCE_RED")
+              for failure in failures:
+                  print("-", failure)
+              raise SystemExit(1)
+          print("TASK14_REPAIR_ACCEPTANCE_GREEN")
+          PY
+
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact Task 14 repaired develop HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: 9fa8ae2bc120a77def29d76e4906233ed6855bd8
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - run: git rev-parse HEAD
+      - name: Task 14 targeted
+        run: pytest tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py -q
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
