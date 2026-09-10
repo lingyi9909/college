@@ -226,6 +226,7 @@ class AlignmentGate:
             decision,
             candidate,
             extraction,
+            final_answer,
         )
         alignment_payload: dict[str, JsonValue] = {
             "provider": self.provider,
@@ -398,6 +399,7 @@ class CorrectnessVerifier:
             decision,
             candidate,
             extraction,
+            final_answer,
         )
         verifier_payload: dict[str, JsonValue] = {
             "provider": self.provider,
@@ -600,10 +602,11 @@ def _validated_source_references(
     decision: ModelDecision,
     candidate: NormalizedQA,
     extraction: AnswerExtraction,
+    final_answer: str,
 ) -> tuple[tuple[str, ...], bool, int]:
     source = {
         "question": candidate.question,
-        "answer": candidate.answer,
+        "answer": final_answer,
         "analysis": candidate.analysis,
     }
     source_field = extraction.source_field
@@ -631,13 +634,12 @@ def _validated_source_references(
             continue
         validated.append(reference)
         covered.add(field)
-        if field == source_field and start <= authority_start and authority_end <= end:
-            authority_covered = True
-    complete = (
-        required_fields.issubset(covered)
-        and authority_covered
-        and invalid_count == 0
-    )
+        if field == source_field:
+            if source_field == "answer":
+                authority_covered = start == 0 and end == len(final_answer)
+            elif start <= authority_start and authority_end <= end:
+                authority_covered = True
+    complete = required_fields.issubset(covered) and authority_covered and invalid_count == 0
     return tuple(validated), complete, invalid_count
 
 

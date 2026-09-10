@@ -378,9 +378,15 @@ class GatePipelineProcessor:
             None,
         )
 
-    def analysis(self, candidate: NormalizedQA) -> _AnalysisOutcome:
+    def analysis(self, candidate: NormalizedQA, answer: AnswerContent) -> _AnalysisOutcome:
+        final_answer = answer.final_answer
+        if not isinstance(final_answer, str) or not final_answer.strip():
+            return _AnalysisOutcome(None, (), "ANSWER_SOURCE_UNTRACEABLE")
+        analysis_candidate = candidate.model_copy(update={"answer": final_answer})
         context = GateContext(config_version=self.config.config_version)
-        result = GateEngine[NormalizedQA](gates=(self._analysis,), context=context).run(candidate)
+        result = GateEngine[NormalizedQA](gates=(self._analysis,), context=context).run(
+            analysis_candidate
+        )
         evidence = result.evidence[-1]
         if result.verdict is GateVerdict.REJECT:
             return _AnalysisOutcome(None, result.evidence, evidence.reason_code)
@@ -728,7 +734,9 @@ class PipelineRunner:
         )
         analysis_outcomes = self._parallel_model_stage(
             analysis_records,
-            lambda raw: self._stage_analysis(run_dir, raw.record_id, normalized[raw.record_id]),
+            lambda raw: self._stage_analysis(
+                run_dir, raw.record_id, normalized[raw.record_id], answers[raw.record_id]
+            ),
             max_workers=self.config.concurrency.classifier,
         )
         analysis_by_id = dict(
@@ -763,7 +771,7 @@ class PipelineRunner:
                 )
                 continue
             analyses[raw.record_id] = analysis_outcome.analysis
-            fp = self._analysis_fingerprint(candidate)
+            fp = self._analysis_fingerprint(candidate, answers[raw.record_id])
             if state.current_stage(run_id, raw.record_id) is RunStage.ANSWER_VALIDATED:
                 state.advance(run_id, raw.record_id, RunStage.ANALYSIS_VALIDATED, fp)
             audits[raw.record_id]["analysis_valid"] = True
@@ -1100,8 +1108,9 @@ class PipelineRunner:
         run_dir: Path,
         record_id: str,
         candidate: NormalizedQA,
+        answer: AnswerContent,
     ) -> _AnalysisOutcome:
-        fingerprint = self._analysis_fingerprint(candidate)
+        fingerprint = self._analysis_fingerprint(candidate, answer)
         artifact = self._load_stage_artifact(run_dir, record_id, "analysis", fingerprint)
         if artifact is not None:
             value = artifact.get("analysis")
@@ -1111,7 +1120,7 @@ class PipelineRunner:
                 _evidence_tuple(artifact.get("evidence")),
                 _optional_text(artifact.get("reject_reason")),
             )
-        outcome = self.processor.analysis(candidate)
+        outcome = self.processor.analysis(candidate, answer)
         self._write_stage_artifact(
             run_dir,
             record_id,
@@ -1168,10 +1177,11 @@ class PipelineRunner:
             }
         )
 
-    def _analysis_fingerprint(self, candidate: NormalizedQA) -> str:
+    def _analysis_fingerprint(self, candidate: NormalizedQA, answer: AnswerContent) -> str:
         return _hash_json(
             {
                 "content": _candidate_hash(candidate),
+                "answer_authority": answer.model_dump(mode="json"),
                 "threshold": self.config.thresholds.analysis,
                 "prompt": self.config.prompt_versions.analysis_classify,
                 "classifier": self.config.providers.classifier.model,

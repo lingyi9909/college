@@ -206,9 +206,7 @@ def test_alignment_pass_requires_real_spans_for_all_source_fields(reference: str
         refs[2] = reference
     else:
         refs = [reference]
-    gate, _ = _alignment_gate(
-        _decision("PASS", 0.999, candidate, evidence_references=tuple(refs))
-    )
+    gate, _ = _alignment_gate(_decision("PASS", 0.999, candidate, evidence_references=tuple(refs)))
 
     evidence = _run(gate, candidate)
 
@@ -488,13 +486,49 @@ def test_verification_golden_cases() -> None:
             analysis=case["analysis"],
         )
         if case["gate"] == "alignment":
-            gate, _ = _alignment_gate(
-                _decision(case["label"], case["score"], candidate)
-            )
+            gate, _ = _alignment_gate(_decision(case["label"], case["score"], candidate))
         else:
-            gate, _ = _correctness_gate(
-                _decision(case["label"], case["score"], candidate)
-            )
+            gate, _ = _correctness_gate(_decision(case["label"], case["score"], candidate))
         evidence = _run(gate, candidate)
         assert evidence.verdict.value == case["expected_verdict"]
         assert evidence.reason_code == case["expected_reason"]
+
+
+def test_alignment_accepts_prompt_answer_reference_when_answer_is_extracted_from_analysis() -> None:
+    candidate = _candidate(
+        question="Explain the result.",
+        answer="",
+        analysis="The argument establishes the value; therefore 4",
+    )
+    refs = (
+        f"question:0-{len(candidate.question)}",
+        "answer:0-1",
+        f"analysis:0-{len(candidate.analysis)}",
+    )
+    gate, provider = _alignment_gate(_decision("PASS", 0.999, candidate, evidence_references=refs))
+    evidence = _run(gate, candidate)
+    assert provider.requests[0].inputs["answer"] == "4"
+    assert evidence.verdict is GateVerdict.PASS
+    assert evidence.reason_code == "QA_ALIGNMENT_CONFIRMED"
+
+
+def test_correctness_accepts_prompt_answer_reference_when_answer_is_extracted_from_analysis() -> (
+    None
+):
+    candidate = _candidate(
+        question="Explain the result.",
+        answer="",
+        analysis="The argument establishes the value; therefore 4",
+    )
+    refs = (
+        f"question:0-{len(candidate.question)}",
+        "answer:0-1",
+        f"analysis:0-{len(candidate.analysis)}",
+    )
+    gate, provider = _correctness_gate(
+        _decision("PASS", 0.999, candidate, evidence_references=refs)
+    )
+    evidence = _run(gate, candidate)
+    assert provider.requests[0].inputs["answer"] == "4"
+    assert evidence.verdict is GateVerdict.PASS
+    assert evidence.reason_code == "CORRECTNESS_CONFIRMED"

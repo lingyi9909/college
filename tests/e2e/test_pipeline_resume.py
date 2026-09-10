@@ -695,3 +695,47 @@ def test_explicit_immutable_revision_change_creates_new_snapshot_and_run(tmp_pat
     assert second_adapter.acquire_calls == 1
     assert first.run_id != second.run_id
     assert "Q2" in output["text_question"]
+
+
+class CaptureAnalysisAnswerProvider(RuleProvider):
+    def __init__(self, *, provider: str, model: str) -> None:
+        super().__init__(provider=provider, model=model)
+        self.analysis_answers: list[object] = []
+
+    def classify(self, request: ModelClassificationRequest) -> ModelDecision:
+        if request.task == "gate_4_original_analysis":
+            self.analysis_answers.append(request.inputs.get("answer"))
+        return super().classify(request)
+
+
+def test_stackmathqa_solution_only_flow_supplies_extracted_answer_through_export(
+    tmp_path: Path,
+) -> None:
+    base = _record(3, "VALID")
+    analysis = "Add one to 3; therefore 4"
+    record = base.model_copy(update={"raw_answer": "", "raw_analysis": analysis})
+    config = _config()
+    workspace = tmp_path / "workspace"
+    primary = CaptureAnalysisAnswerProvider(provider="fixture-primary", model="primary-v1")
+    verifier = RuleProvider(provider="fixture-verifier", model="verifier-v1")
+    runner = PipelineRunner(
+        config=config,
+        workspace=workspace,
+        processor=_processor(
+            config=config, workspace=workspace, primary=primary, verifier=verifier
+        ),
+    )
+    result = runner.run(
+        adapter=CountingAdapter((record,)), source_config={}, output_dir=tmp_path / "output"
+    )
+    assert primary.analysis_answers == ["4"]
+    assert result.accepted_count == 1
+    rows = [
+        json.loads(line)
+        for line in result.output_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(rows) == 1
+    assert len(rows[0]) == 19
+    assert rows[0]["text_answer"] == "4"
+    assert rows[0]["answer_analysis"] == analysis
