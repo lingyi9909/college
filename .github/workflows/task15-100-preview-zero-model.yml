@@ -1,4 +1,4 @@
-name: Task 15 StackMathQA Answer Flow RED
+name: Task 15 Answer Flow Fix and Verify
 
 on:
   push:
@@ -6,84 +6,96 @@ on:
       - ci/task15-100-preview-zero-model
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  red:
+  fix:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 3d1c047563d34d3de9bed01200256a50d84fb435
+          ref: feature/task15-pilot-freeze
+          fetch-depth: 0
+      - name: Assert accepted starting HEAD
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "3d1c047563d34d3de9bed01200256a50d84fb435"
+          test -z "$(git status --porcelain)"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m pip install -e '.[dev]'
-      - name: Add ephemeral regression
+      - name: Apply minimal answer-authority propagation fix and permanent regression
         shell: bash
         run: |
-          cat >> tests/e2e/test_pipeline_resume.py <<'PY'
+          python - <<'PY'
+          from pathlib import Path
 
-          class RequireExtractedAnswerAtAnalysisProvider(RuleProvider):
-              def classify(self, request: ModelClassificationRequest) -> ModelDecision:
-                  if request.task == "gate_4_original_analysis":
-                      assert request.inputs.get("answer") == "4"
-                  return super().classify(request)
+          runner_path = Path('src/college_builder/pipeline/runner.py')
+          text = runner_path.read_text(encoding='utf-8')
 
+          replacements = [
+              (
+                  '''    def analysis(self, candidate: NormalizedQA) -> _AnalysisOutcome:\n        context = GateContext(config_version=self.config.config_version)\n        result = GateEngine[NormalizedQA](gates=(self._analysis,), context=context).run(candidate)\n''',
+                  '''    def analysis(\n        self, candidate: NormalizedQA, answer: AnswerContent\n    ) -> _AnalysisOutcome:\n        final_answer = answer.final_answer\n        if not isinstance(final_answer, str) or not final_answer.strip():\n            return _AnalysisOutcome(None, (), "ANSWER_SOURCE_UNTRACEABLE")\n        analysis_candidate = candidate.model_copy(update={"answer": final_answer})\n        context = GateContext(config_version=self.config.config_version)\n        result = GateEngine[NormalizedQA](gates=(self._analysis,), context=context).run(\n            analysis_candidate\n        )\n'''
+              ),
+              (
+                  '''            lambda raw: self._stage_analysis(run_dir, raw.record_id, normalized[raw.record_id]),\n''',
+                  '''            lambda raw: self._stage_analysis(\n                run_dir,\n                raw.record_id,\n                normalized[raw.record_id],\n                answers[raw.record_id],\n            ),\n'''
+              ),
+              (
+                  '''            fp = self._analysis_fingerprint(candidate)\n''',
+                  '''            fp = self._analysis_fingerprint(candidate, answers[raw.record_id])\n'''
+              ),
+              (
+                  '''    def _stage_analysis(\n        self,\n        run_dir: Path,\n        record_id: str,\n        candidate: NormalizedQA,\n    ) -> _AnalysisOutcome:\n        fingerprint = self._analysis_fingerprint(candidate)\n''',
+                  '''    def _stage_analysis(\n        self,\n        run_dir: Path,\n        record_id: str,\n        candidate: NormalizedQA,\n        answer: AnswerContent,\n    ) -> _AnalysisOutcome:\n        fingerprint = self._analysis_fingerprint(candidate, answer)\n'''
+              ),
+              (
+                  '''        outcome = self.processor.analysis(candidate)\n''',
+                  '''        outcome = self.processor.analysis(candidate, answer)\n'''
+              ),
+              (
+                  '''    def _analysis_fingerprint(self, candidate: NormalizedQA) -> str:\n        return _hash_json(\n            {\n                "content": _candidate_hash(candidate),\n                "threshold": self.config.thresholds.analysis,\n''',
+                  '''    def _analysis_fingerprint(\n        self, candidate: NormalizedQA, answer: AnswerContent\n    ) -> str:\n        return _hash_json(\n            {\n                "content": _candidate_hash(candidate),\n                "answer_authority": answer.model_dump(mode="json"),\n                "threshold": self.config.thresholds.analysis,\n'''
+              ),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one replacement, found {count}: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+          runner_path.write_text(text, encoding='utf-8', newline='\n')
 
-          def test_stackmathqa_solution_only_flow_supplies_extracted_answer_to_analysis_gate(
-              tmp_path: Path,
-          ) -> None:
-              base = _record(3, "VALID")
-              analysis = "Add one to 3; therefore 4"
-              record = base.model_copy(
-                  update={"raw_answer": "", "raw_analysis": analysis}
-              )
-              config = _config()
-              workspace = tmp_path / "workspace"
-              primary = RequireExtractedAnswerAtAnalysisProvider(
-                  provider="fixture-primary", model="primary-v1"
-              )
-              verifier = RuleProvider(provider="fixture-verifier", model="verifier-v1")
-              runner = PipelineRunner(
-                  config=config,
-                  workspace=workspace,
-                  processor=_processor(
-                      config=config,
-                      workspace=workspace,
-                      primary=primary,
-                      verifier=verifier,
-                  ),
-              )
-
-              result = runner.run(
-                  adapter=CountingAdapter((record,)),
-                  source_config={},
-                  output_dir=tmp_path / "output",
-              )
-
-              assert result.accepted_count == 1
-              rows = [
-                  json.loads(line)
-                  for line in result.output_path.read_text(encoding="utf-8").splitlines()
-                  if line.strip()
-              ]
-              assert len(rows) == 1
-              assert rows[0]["text_answer"] == "4"
-              assert rows[0]["answer_analysis"] == analysis
+          test_path = Path('tests/e2e/test_pipeline_resume.py')
+          test_text = test_path.read_text(encoding='utf-8')
+          marker = 'test_stackmathqa_solution_only_flow_supplies_extracted_answer_to_analysis_gate'
+          if marker in test_text:
+              raise SystemExit('regression test already exists unexpectedly')
+          test_text += '''\n\nclass RequireExtractedAnswerAtAnalysisProvider(RuleProvider):\n    def classify(self, request: ModelClassificationRequest) -> ModelDecision:\n        if request.task == "gate_4_original_analysis":\n            assert request.inputs.get("answer") == "4"\n        return super().classify(request)\n\n\ndef test_stackmathqa_solution_only_flow_supplies_extracted_answer_to_analysis_gate(\n    tmp_path: Path,\n) -> None:\n    base = _record(3, "VALID")\n    analysis = "Add one to 3; therefore 4"\n    record = base.model_copy(update={"raw_answer": "", "raw_analysis": analysis})\n    config = _config()\n    workspace = tmp_path / "workspace"\n    primary = RequireExtractedAnswerAtAnalysisProvider(\n        provider="fixture-primary", model="primary-v1"\n    )\n    verifier = RuleProvider(provider="fixture-verifier", model="verifier-v1")\n    runner = PipelineRunner(\n        config=config,\n        workspace=workspace,\n        processor=_processor(\n            config=config, workspace=workspace, primary=primary, verifier=verifier\n        ),\n    )\n\n    result = runner.run(\n        adapter=CountingAdapter((record,)),\n        source_config={},\n        output_dir=tmp_path / "output",\n    )\n\n    assert result.accepted_count == 1\n    rows = [\n        json.loads(line)\n        for line in result.output_path.read_text(encoding="utf-8").splitlines()\n        if line.strip()\n    ]\n    assert len(rows) == 1\n    assert len(rows[0]) == 19\n    assert rows[0]["text_answer"] == "4"\n    assert rows[0]["answer_analysis"] == analysis\n''' 
+          test_path.write_text(test_text, encoding='utf-8', newline='\n')
           PY
-      - name: Verify RED is the expected production bug
+      - name: GREEN targeted regression
+        run: pytest -q tests/e2e/test_pipeline_resume.py -k stackmathqa_solution_only_flow_supplies_extracted_answer_to_analysis_gate
+      - name: Pipeline and export regressions
+        run: pytest -q tests/e2e/test_pipeline_resume.py tests/e2e/test_final_export.py tests/e2e/test_gold_regression.py tests/e2e/test_task15_pipeline_concurrency.py
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
+      - name: Commit production fix to feature only
         shell: bash
         run: |
-          set +e
-          pytest -q tests/e2e/test_pipeline_resume.py -k stackmathqa_solution_only_flow_supplies_extracted_answer_to_analysis_gate > /tmp/red.log 2>&1
-          rc=$?
-          cat /tmp/red.log
-          if [ "$rc" -eq 0 ]; then
-            echo "Regression unexpectedly passed; RED not proven" >&2
-            exit 1
-          fi
-          grep -q "assert result.accepted_count == 1" /tmp/red.log
-          grep -q "1 failed" /tmp/red.log
-          echo TASK15_STACKMATHQA_ANSWER_FLOW_RED=PASS
+          set -euo pipefail
+          git diff --check
+          git status --short
+          git config user.name "lingyi9909"
+          git config user.email "zhanhui9909@gmail.com"
+          git add src/college_builder/pipeline/runner.py tests/e2e/test_pipeline_resume.py
+          git commit -m "fix: propagate extracted answer into analysis gate"
+          git push origin HEAD:feature/task15-pilot-freeze
+          echo "TASK15_FIX_HEAD=$(git rev-parse HEAD)"
