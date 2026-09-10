@@ -1,0 +1,10 @@
+name: Task 15 Post-5K Certification Placeholder
+
+on:
+  workflow_dispatch:
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo post-5k certification is intentionally manual after formal run evidence
