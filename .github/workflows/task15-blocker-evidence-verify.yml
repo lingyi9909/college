@@ -1,0 +1,88 @@
+name: Task 15 Blocker Evidence Verification
+
+on:
+  push:
+    branches:
+      - ci/task15-blocker-evidence-verify
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d43ac5f8fc9b11944f2de559c80f37a011ed9dad
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install project
+        run: python -m pip install -e '.[dev]'
+
+      - name: Targeted Task 15 verification
+        run: |
+          pytest tests/unit/pipeline/test_pilot.py \
+                 tests/e2e/test_pilot_5k.py \
+                 tests/e2e/test_pilot_sample_command.py \
+                 tests/e2e/test_gold_regression.py \
+                 tests/unit/source/test_gold.py \
+                 tests/unit/source/test_stackmathqa.py -q
+
+      - name: Full test suite
+        run: pytest -q
+
+      - name: Ruff
+        run: ruff check src tests
+
+      - name: MyPy
+        run: mypy src
+
+      - name: Verify Task 15 evidence and scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path('artifacts/5k/run_report.json').read_text(encoding='utf-8'))
+          assert report['status'] == 'BLOCKED_STABLE_PROVIDER_IDENTITY'
+          assert report['source_revision'] == 'git:13239ec8c8078bc8dfb43e1383069eb9be000ff7'
+          assert report['sampling']['seed'] == 20260910
+          assert report['sampling']['sample_sha256'] == 'e9d7b957a092114da35dbb839319a08ab555692a8a06863faf2b1980c2a681c5'
+          assert report['provider_execution_evidence']['copilot_fixed_model_diagnostics']['explicit_model_success_count'] == 0
+          assert report['provider_execution_evidence']['copilot_fixed_model_diagnostics']['run_id'] == 34448910429
+          assert report['provider_execution_evidence']['copilot_auto_micro_run']['run_id'] == 34445107273
+          assert report['provider_execution_evidence']['copilot_auto_micro_run']['pipeline_provider_errors'] == 0
+          assert report['provider_execution_evidence']['copilot_auto_micro_run']['model_identity_freezeable'] is False
+
+          config_sha = hashlib.sha256(Path('config/pilot-5k-frozen.yaml').read_bytes()).hexdigest()
+          assert config_sha == report['config_sha256'] == '0c13691fce9a8300cf159db55fc2ae3ba0135d8abb123605686697aab54341b4'
+
+          assert not Path('artifacts/5k/sample.jsonl').exists()
+          print('TASK15_EVIDENCE_JSON=PASS')
+          print('TASK15_CONFIG_SHA=PASS')
+          print('TASK15_NO_RAW_5K=PASS')
+          PY
+
+          changed="$(git diff --name-only c7a57d9142156232444d2e7f8fc83031d09d039e..d43ac5f8fc9b11944f2de559c80f37a011ed9dad)"
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -q '^\.github/workflows/'; then
+            echo 'Task 15 feature contains workflow changes' >&2
+            exit 1
+          fi
+          allowed='^(artifacts/5k/run_report\.json|config/pilot-5k-frozen\.yaml|docs/validation/5k-dry-run-report\.md|src/college_builder/cli\.py|src/college_builder/pipeline/pilot\.py|src/college_builder/source/gold\.py|tests/e2e/test_gold_regression\.py|tests/e2e/test_pilot_5k\.py|tests/e2e/test_pilot_sample_command\.py|tests/unit/pipeline/test_pilot\.py)$'
+          unexpected="$(printf '%s\n' "$changed" | grep -Ev "$allowed" || true)"
+          if [ -n "$unexpected" ]; then
+            echo 'Unexpected Task 15 scope:' >&2
+            printf '%s\n' "$unexpected" >&2
+            exit 1
+          fi
+          echo TASK15_SCOPE_AUDIT=PASS
