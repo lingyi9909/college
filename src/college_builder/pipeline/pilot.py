@@ -248,10 +248,11 @@ def _bounded_priority_sample(
 
     selected: list[RawSourceRecord] = []
     for site in plan.quotas:
-        ordered = sorted(
-            ((-priority, record_id, raw_hash, record) for priority, record_id, raw_hash, record in heaps[site]),
-            key=lambda item: (item[0], item[1], item[2]),
+        candidates = (
+            (-priority, record_id, raw_hash, record)
+            for priority, record_id, raw_hash, record in heaps[site]
         )
+        ordered = sorted(candidates, key=lambda item: (item[0], item[1], item[2]))
         selected.extend(item[3] for item in ordered)
     return tuple(selected)
 
