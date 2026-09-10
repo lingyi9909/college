@@ -30,6 +30,9 @@ dev = [
   "mypy>=1.13,<2",
 ]
 
+[project.scripts]
+college-builder = "college_builder.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
