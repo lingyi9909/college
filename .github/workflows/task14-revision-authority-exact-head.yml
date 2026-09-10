@@ -1,0 +1,27 @@
+name: Task 14 Revision Authority Exact Head
+on:
+  push:
+    branches:
+      - ci/task14-revision-authority-exact-head
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c7a57d9142156232444d2e7f8fc83031d09d039e
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - run: git rev-parse HEAD
+      - name: Targeted Task 14 E2E
+        run: pytest tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py -q
+      - name: Full tests
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
