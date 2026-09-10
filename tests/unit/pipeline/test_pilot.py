@@ -86,6 +86,7 @@ def test_pilot_manifest_rejects_non_immutable_source_revision() -> None:
             total=1,
             sample_sha256="a" * 64,
             sampled_record_ids=("math-00001",),
+            sampled_raw_sha256=("b" * 64,),
             source_revisions={"stackmathqa": "main"},
         )
 
