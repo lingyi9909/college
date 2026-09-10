@@ -5,12 +5,12 @@ import time
 from pathlib import Path
 
 import pytest
+from test_pipeline_resume import CountingAdapter, RuleProvider, _config, _processor, _record
 
 from college_builder.config import ConcurrencyConfig
 from college_builder.pipeline.runner import PipelineInterrupted, PipelineRunner
 from college_builder.providers.base import ModelClassificationRequest, ModelDecision
 from college_builder.storage.state import RunStage
-from test_pipeline_resume import CountingAdapter, RuleProvider, _config, _processor, _record
 
 
 class ConcurrentProbeProvider(RuleProvider):
@@ -60,7 +60,10 @@ def test_classification_stage_honors_configured_concurrency(tmp_path: Path) -> N
             verifier=verifier,
         ),
     )
-    adapter = CountingAdapter((_record(1, "VALID"), _record(2, "VALID")), revision="sha256:" + "1" * 64)
+    adapter = CountingAdapter(
+        (_record(1, "VALID"), _record(2, "VALID")),
+        revision="sha256:" + "1" * 64,
+    )
 
     with pytest.raises(PipelineInterrupted) as interrupted:
         runner.run(
