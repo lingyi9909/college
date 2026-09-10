@@ -140,6 +140,47 @@ jobs:
             --workspace /tmp/task15-micro-workspace \
             --output /tmp/task15-micro-output
 
+      - name: Collect sanitized provider-error diagnostics
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('/tmp/task15-micro-workspace') / 'runs'
+          diagnostics = []
+          if root.is_dir():
+              for run_dir in sorted(root.iterdir()):
+                  rejected = run_dir / 'rejected'
+                  if not rejected.is_dir():
+                      continue
+                  for path in sorted(rejected.glob('*.json')):
+                      item = json.loads(path.read_text(encoding='utf-8'))
+                      if item.get('reason_code') != 'MODEL_PROVIDER_ERROR':
+                          continue
+                      details = item.get('details') if isinstance(item.get('details'), dict) else {}
+                      evidence = item.get('evidence') if isinstance(item.get('evidence'), list) else []
+                      gate_names = sorted({
+                          str(ev.get('gate_name'))
+                          for ev in evidence
+                          if isinstance(ev, dict) and ev.get('reason_code') == 'MODEL_PROVIDER_ERROR'
+                      })
+                      diagnostics.append({
+                          'stage': item.get('stage'),
+                          'reason_code': item.get('reason_code'),
+                          'provider': item.get('provider'),
+                          'model': item.get('model'),
+                          'provider_role': details.get('provider_role'),
+                          'exception_type': details.get('exception_type'),
+                          'gate_names': gate_names,
+                      })
+          payload = {'provider_error_count': len(diagnostics), 'errors': diagnostics}
+          Path('/tmp/task15-provider-error-diagnostics.json').write_text(
+              json.dumps(payload, sort_keys=True, indent=2) + '\n', encoding='utf-8')
+          print('TASK15_PROVIDER_ERROR_DIAGNOSTICS=' + json.dumps(payload, sort_keys=True))
+          PY
+
       - name: Summarize non-content production evidence
         shell: bash
         run: |
@@ -180,9 +221,11 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if test -f /tmp/task15-deepseek-micro-summary.json; then
-            ! grep -Eq 'raw_question|raw_answer|raw_analysis|raw_payload' /tmp/task15-deepseek-micro-summary.json
-          fi
+          for f in /tmp/task15-deepseek-micro-summary.json /tmp/task15-provider-error-diagnostics.json; do
+            if test -f "$f"; then
+              ! grep -Eq 'raw_question|raw_answer|raw_analysis|raw_payload' "$f"
+            fi
+          done
           echo TASK15_ARTIFACT_SAFETY=PASS
 
       - uses: actions/upload-artifact@v4
@@ -191,6 +234,7 @@ jobs:
           name: task15-deepseek-provider-probe-evidence
           path: |
             /tmp/task15-provider-probe.json
+            /tmp/task15-provider-error-diagnostics.json
             /tmp/task15-deepseek-micro-summary.json
             /tmp/task15-micro-run-report.json
           if-no-files-found: warn
