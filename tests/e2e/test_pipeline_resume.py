@@ -211,12 +211,17 @@ def _processor(
     primary: RuleProvider,
     verifier: RuleProvider,
 ) -> GatePipelineProcessor:
+    def prompt_loader(task: str, version: str) -> str:
+        base = Path("prompts") / task / "v1.txt"
+        return f"{base.read_text(encoding='utf-8')}\nfixture_prompt_version={version}\n"
+
     return GatePipelineProcessor(
         config=config,
         cache_path=workspace / "cache" / "calls.sqlite3",
         primary_provider=primary,
         verifier_provider=verifier,
         project_root=Path("."),
+        prompt_loader=prompt_loader,
     )
 
 
