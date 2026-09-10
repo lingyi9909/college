@@ -148,7 +148,8 @@ jobs:
           from pathlib import Path
           run_dirs = list((Path('/tmp/task15-micro-workspace') / 'runs').iterdir())
           assert len(run_dirs) == 1
-          report = json.loads((run_dirs[0] / 'run_report.json').read_text())
+          report_path = run_dirs[0] / 'run_report.json'
+          report = json.loads(report_path.read_text())
           summary = {
               'raw_count': report['raw_count'],
               'accepted_count': report['accepted_count'],
@@ -158,30 +159,39 @@ jobs:
               'provider_call_counts': report['provider_call_counts'],
               'pipeline_provider_errors': report['provider_errors'],
               'fallback_count': report['fallback_count'],
+              'provider_latency_seconds': report['provider_latency_seconds'],
+              'wall_time_seconds': report['wall_time_seconds'],
               'classifier': {'provider': 'openai_compatible', 'model': 'deepseek-flash'},
               'verifier': {'provider': 'openai_compatible', 'model': 'deepseek-v4-pro'},
           }
-          assert summary['raw_count'] == 4
-          assert summary['pipeline_provider_errors'] == 0
           Path('/tmp/task15-deepseek-micro-summary.json').write_text(
               json.dumps(summary, sort_keys=True, indent=2) + '\n', encoding='utf-8')
+          Path('/tmp/task15-micro-run-report.json').write_text(
+              json.dumps(report, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8')
           print('TASK15_DEEPSEEK_MICRO=' + json.dumps(summary, sort_keys=True))
+          assert summary['raw_count'] == 4
+          if summary['pipeline_provider_errors'] != 0:
+              print(f"TASK15_PROVIDER_ERRORS={summary['pipeline_provider_errors']}")
+              raise SystemExit(12)
           print('TASK15_PRODUCTION_MICRO=PASS')
           PY
 
       - name: Retain only non-content evidence
+        if: always()
         shell: bash
         run: |
-          cp "$(find /tmp/task15-micro-workspace/runs -name run_report.json -print -quit)" /tmp/task15-micro-run-report.json
-          ! grep -Eq 'raw_question|raw_answer|raw_analysis|raw_payload' /tmp/task15-deepseek-micro-summary.json
+          if test -f /tmp/task15-deepseek-micro-summary.json; then
+            ! grep -Eq 'raw_question|raw_answer|raw_analysis|raw_payload' /tmp/task15-deepseek-micro-summary.json
+          fi
           echo TASK15_ARTIFACT_SAFETY=PASS
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: task15-deepseek-provider-probe-evidence
           path: |
             /tmp/task15-provider-probe.json
             /tmp/task15-deepseek-micro-summary.json
             /tmp/task15-micro-run-report.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
