@@ -1,4 +1,4 @@
-name: Task 15 100 Field Audit Zero Model
+name: Task 15 StackMathQA Answer Flow RED
 
 on:
   push:
@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  audit:
+  red:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,244 +20,70 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -e '.[dev]'
-      - name: Audit same bounded 100 records without model calls
+      - name: Add ephemeral regression
         shell: bash
         run: |
-          python - <<'PY'
-          import json
-          import re
-          from collections import Counter
-          from pathlib import Path
-          from urllib.parse import urlparse
+          cat >> tests/e2e/test_pipeline_resume.py <<'PY'
 
-          from college_builder.normalize.normalizer import normalize
-          from college_builder.quality.answer import extract_source_answer
-          from college_builder.source.stackmathqa import OFFICIAL_SOURCE_FILES, StackMathQAAdapter
+          class RequireExtractedAnswerAtAnalysisProvider(RuleProvider):
+              def classify(self, request: ModelClassificationRequest) -> ModelDecision:
+                  if request.task == "gate_4_original_analysis":
+                      assert request.inputs.get("answer") == "4"
+                  return super().classify(request)
 
-          quotas = {'math': 40, 'physics': 20, 'statistics': 20, 'mathoverflow': 20}
-          revision = 'git:13239ec8c8078bc8dfb43e1383069eb9be000ff7'
-          base = ('https://huggingface.co/datasets/math-ai/StackMathQA/resolve/'
-                  '13239ec8c8078bc8dfb43e1383069eb9be000ff7/'
-                  'preprocessed/stackexchange-math--1q1a')
-          selected = []
-          counts = {key: 0 for key in quotas}
-          strata = []
 
-          for filename, (stratum, _host) in OFFICIAL_SOURCE_FILES.items():
-              quota = quotas[stratum]
-              adapter = StackMathQAAdapter()
-              descriptor = tuple(adapter.discover({
-                  'data_file': f'{base}/{filename}',
-                  'revision': revision,
-                  'license_metadata': {'declared': 'CC-BY-4.0', 'status': 'UPSTREAM_DECLARED'},
-              }))[0]
-              for record in adapter.acquire(descriptor):
-                  if counts[stratum] >= quota:
-                      break
-                  if record.metadata.get('language') != 'en':
-                      continue
-                  if len(record.raw_question) > 1600 or len(record.raw_analysis) > 3200:
-                      continue
-                  if extract_source_answer(normalize(record)).final_answer is None:
-                      continue
-                  selected.append(record)
-                  strata.append(stratum)
-                  counts[stratum] += 1
-
-          assert counts == quotas, (counts, quotas)
-          assert len(selected) == 100
-
-          raw_fields = [
-              'record_id','source_type','source_dataset','source_id','source_url',
-              'raw_question','raw_answer','raw_analysis','raw_payload','metadata',
-              'license_metadata','raw_sha256'
-          ]
-          normalized_fields = [
-              'record_id','source_record_id','question','answer','analysis',
-              'subject_candidates','images','metadata','normalization_evidence'
-          ]
-          raw_empty = Counter()
-          normalized_empty = Counter()
-          raw_missing = Counter()
-          normalized_missing = Counter()
-          mapping_failures = Counter()
-          extraction_sources = Counter()
-          extraction_lengths = []
-          suspicious_extractions = []
-          rows = []
-
-          record_ids = []
-          source_ids = []
-          source_urls = []
-          questions = []
-
-          def is_empty(v):
-              if v is None:
-                  return True
-              if isinstance(v, str):
-                  return not v.strip()
-              if isinstance(v, (list, tuple, dict)):
-                  return len(v) == 0
-              return False
-
-          for idx, (stratum, record) in enumerate(zip(strata, selected), start=1):
-              raw = record.model_dump(mode='json')
-              norm_obj = normalize(record)
-              norm = norm_obj.model_dump(mode='json')
-              ext = extract_source_answer(norm_obj)
-
-              record_ids.append(record.record_id)
-              source_ids.append(record.source_id)
-              source_urls.append(record.source_url)
-              questions.append(norm_obj.question.strip())
-
-              for f in raw_fields:
-                  if f not in raw:
-                      raw_missing[f] += 1
-                  elif is_empty(raw[f]):
-                      raw_empty[f] += 1
-              for f in normalized_fields:
-                  if f not in norm:
-                      normalized_missing[f] += 1
-                  elif is_empty(norm[f]):
-                      normalized_empty[f] += 1
-
-              payload = raw['raw_payload']
-              if payload.get('Q') != record.raw_question:
-                  mapping_failures['Q_to_raw_question'] += 1
-              if payload.get('A') != record.raw_analysis:
-                  mapping_failures['A_to_raw_analysis'] += 1
-              if record.raw_answer != '':
-                  mapping_failures['raw_answer_expected_empty'] += 1
-              if norm_obj.question.strip() == '':
-                  mapping_failures['normalized_question_empty'] += 1
-              if norm_obj.analysis.strip() == '':
-                  mapping_failures['normalized_analysis_empty'] += 1
-              if record.metadata.get('language') != 'en':
-                  mapping_failures['language_not_en'] += 1
-              if record.metadata.get('source_site') != stratum:
-                  mapping_failures['source_site_mismatch'] += 1
-              if not isinstance(record.metadata.get('acquisition'), dict):
-                  mapping_failures['acquisition_missing'] += 1
-              if record.license_metadata.get('declared') != 'CC-BY-4.0':
-                  mapping_failures['license_declared'] += 1
-              if record.license_metadata.get('status') != 'UPSTREAM_DECLARED':
-                  mapping_failures['license_status'] += 1
-              if urlparse(record.source_url).scheme not in {'http','https'}:
-                  mapping_failures['source_url_scheme'] += 1
-              if re.fullmatch(r'[0-9a-f]{64}', record.raw_sha256) is None:
-                  mapping_failures['raw_sha256'] += 1
-
-              extraction_sources[str(ext.source_field)] += 1
-              ans = ext.final_answer or ''
-              extraction_lengths.append(len(ans))
-              ratio = len(ans) / max(1, len(norm_obj.analysis))
-              suspicious = (
-                  len(ans) > 300
-                  or ratio > 0.60
-                  or ans.count('.') + ans.count('!') + ans.count('?') >= 4
+          def test_stackmathqa_solution_only_flow_supplies_extracted_answer_to_analysis_gate(
+              tmp_path: Path,
+          ) -> None:
+              base = _record(3, "VALID")
+              analysis = "Add one to 3; therefore 4"
+              record = base.model_copy(
+                  update={"raw_answer": "", "raw_analysis": analysis}
               )
-              if suspicious:
-                  suspicious_extractions.append({
-                      'index': idx,
-                      'stratum': stratum,
-                      'source_record_id': record.record_id,
-                      'source_url': record.source_url,
-                      'question': norm_obj.question[:500],
-                      'extracted_answer': ans[:1200],
-                      'extracted_answer_length': len(ans),
-                      'analysis_length': len(norm_obj.analysis),
-                      'answer_to_analysis_ratio': round(ratio, 4),
-                      'source_field': ext.source_field,
-                      'source_span': ext.source_span,
-                  })
+              config = _config()
+              workspace = tmp_path / "workspace"
+              primary = RequireExtractedAnswerAtAnalysisProvider(
+                  provider="fixture-primary", model="primary-v1"
+              )
+              verifier = RuleProvider(provider="fixture-verifier", model="verifier-v1")
+              runner = PipelineRunner(
+                  config=config,
+                  workspace=workspace,
+                  processor=_processor(
+                      config=config,
+                      workspace=workspace,
+                      primary=primary,
+                      verifier=verifier,
+                  ),
+              )
 
-              rows.append({
-                  'index': idx,
-                  'stratum': stratum,
-                  'source_record_id': record.record_id,
-                  'source_url': record.source_url,
-                  'raw_question_nonempty': bool(record.raw_question.strip()),
-                  'raw_answer_nonempty': bool(record.raw_answer.strip()),
-                  'raw_analysis_nonempty': bool(record.raw_analysis.strip()),
-                  'normalized_question_nonempty': bool(norm_obj.question.strip()),
-                  'normalized_answer_nonempty': bool(norm_obj.answer.strip()),
-                  'normalized_analysis_nonempty': bool(norm_obj.analysis.strip()),
-                  'extracted_final_answer_nonempty': ext.final_answer is not None and bool(ext.final_answer.strip()),
-                  'extracted_answer_length': len(ans),
-                  'extracted_answer_source_field': ext.source_field,
-              })
+              result = runner.run(
+                  adapter=CountingAdapter((record,)),
+                  source_config={},
+                  output_dir=tmp_path / "output",
+              )
 
-          def duplicate_stats(values):
-              c = Counter(values)
-              groups = {k:v for k,v in c.items() if v > 1}
-              return {
-                  'duplicate_groups': len(groups),
-                  'duplicate_rows_beyond_first': sum(v - 1 for v in groups.values()),
-                  'max_multiplicity': max(groups.values()) if groups else 1,
-              }
-
-          lengths = sorted(extraction_lengths)
-          audit = {
-              'sample_count': len(selected),
-              'strata': counts,
-              'no_model_calls': True,
-              'raw_schema': {
-                  'fields_checked': raw_fields,
-                  'missing_counts': dict(raw_missing),
-                  'empty_counts': {f: raw_empty.get(f, 0) for f in raw_fields},
-              },
-              'normalized_schema': {
-                  'fields_checked': normalized_fields,
-                  'missing_counts': dict(normalized_missing),
-                  'empty_counts': {f: normalized_empty.get(f, 0) for f in normalized_fields},
-              },
-              'mapping_failures': dict(mapping_failures),
-              'source_mapping': {
-                  'upstream_Q_to_raw_question_pass': 100 - mapping_failures['Q_to_raw_question'],
-                  'upstream_A_to_raw_analysis_pass': 100 - mapping_failures['A_to_raw_analysis'],
-                  'raw_answer_is_intentionally_empty_count': sum(not bool(r.raw_answer.strip()) for r in selected),
-              },
-              'answer_extraction': {
-                  'final_answer_nonempty_count': sum(r['extracted_final_answer_nonempty'] for r in rows),
-                  'source_field_counts': dict(extraction_sources),
-                  'length_min': min(lengths),
-                  'length_median': lengths[len(lengths)//2],
-                  'length_p90': lengths[int(len(lengths)*0.9)-1],
-                  'length_max': max(lengths),
-                  'over_300_chars': sum(x > 300 for x in lengths),
-                  'over_600_chars': sum(x > 600 for x in lengths),
-                  'suspicious_count': len(suspicious_extractions),
-              },
-              'duplicates': {
-                  'record_id': duplicate_stats(record_ids),
-                  'source_id': duplicate_stats(source_ids),
-                  'source_url': duplicate_stats(source_urls),
-                  'normalized_question': duplicate_stats(questions),
-              },
-              'target_core_readiness': {
-                  'text_question_nonempty_count': sum(bool(normalize(r).question.strip()) for r in selected),
-                  'text_answer_nonempty_via_extractor_count': sum(extract_source_answer(normalize(r)).final_answer is not None for r in selected),
-                  'answer_analysis_nonempty_count': sum(bool(normalize(r).analysis.strip()) for r in selected),
-                  'note': 'These counts show only structural population of the 3 core content fields; semantic correctness of extracted answers is not established by this zero-model audit.'
-              },
-              'suspicious_extraction_examples': suspicious_extractions[:12],
-              'per_record_core_checks': rows,
-          }
-          Path('/tmp/task15-100-field-audit.json').write_text(
-              json.dumps(audit, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
-          )
-          print(json.dumps({
-              'raw_empty': audit['raw_schema']['empty_counts'],
-              'normalized_empty': audit['normalized_schema']['empty_counts'],
-              'mapping_failures': audit['mapping_failures'],
-              'answer_extraction': audit['answer_extraction'],
-              'duplicates': audit['duplicates'],
-              'target_core_readiness': audit['target_core_readiness'],
-          }, ensure_ascii=False, indent=2))
+              assert result.accepted_count == 1
+              rows = [
+                  json.loads(line)
+                  for line in result.output_path.read_text(encoding="utf-8").splitlines()
+                  if line.strip()
+              ]
+              assert len(rows) == 1
+              assert rows[0]["text_answer"] == "4"
+              assert rows[0]["answer_analysis"] == analysis
           PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: task15-100-field-audit-zero-model
-          path: /tmp/task15-100-field-audit.json
-          retention-days: 7
+      - name: Verify RED is the expected production bug
+        shell: bash
+        run: |
+          set +e
+          pytest -q tests/e2e/test_pipeline_resume.py -k stackmathqa_solution_only_flow_supplies_extracted_answer_to_analysis_gate > /tmp/red.log 2>&1
+          rc=$?
+          cat /tmp/red.log
+          if [ "$rc" -eq 0 ]; then
+            echo "Regression unexpectedly passed; RED not proven" >&2
+            exit 1
+          fi
+          grep -q "assert result.accepted_count == 1" /tmp/red.log
+          grep -q "1 failed" /tmp/red.log
+          echo TASK15_STACKMATHQA_ANSWER_FLOW_RED=PASS
