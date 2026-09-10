@@ -1,0 +1,540 @@
+name: Task 15 Hardening
+on: push
+permissions:
+  contents: write
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/task15-pilot-freeze
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Add RED tests for real sampling command and Gold regression
+        shell: bash
+        run: |
+          cat >> tests/unit/pipeline/test_pilot.py <<'PY'
+
+
+          def test_sample_identity_changes_when_same_record_id_content_hash_changes() -> None:
+              plan = FiveKPilotPlan(
+                  seed=9,
+                  quotas={"math": 1, "physics": 1, "statistics": 1, "mathoverflow": 1},
+              )
+              records = [_record(site, 1) for site in plan.quotas]
+              revision = "git:" + "b" * 40
+              first = build_pilot_sample(records, plan=plan, source_revisions={"stackmathqa": revision})
+              changed = records[0].model_copy(update={"raw_sha256": "f" * 64})
+              second = build_pilot_sample(
+                  [changed, *records[1:]],
+                  plan=plan,
+                  source_revisions={"stackmathqa": revision},
+              )
+
+              assert first.manifest.sampled_record_ids == second.manifest.sampled_record_ids
+              assert first.manifest.sample_sha256 != second.manifest.sample_sha256
+              assert first.manifest.sampled_raw_sha256 != second.manifest.sampled_raw_sha256
+          PY
+
+          cat > tests/e2e/test_pilot_sample_command.py <<'PY'
+          from __future__ import annotations
+
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          from typer.testing import CliRunner
+
+          from college_builder.cli import app
+          from college_builder.pipeline.pilot import FIVE_K_QUOTAS
+
+          SOURCES = {
+              "math": ("math.stackexchange.com.jsonl", "math.stackexchange.com", 2000),
+              "physics": ("physics.stackexchange.com.jsonl", "physics.stackexchange.com", 1000),
+              "statistics": ("stats.stackexchange.com.jsonl", "stats.stackexchange.com", 1000),
+              "mathoverflow": ("mathoverflow.net.jsonl", "mathoverflow.net", 1000),
+          }
+
+
+          def _write_source_root(root: Path) -> None:
+              root.mkdir(parents=True)
+              question_id = 1
+              for site, (filename, host, count) in SOURCES.items():
+                  path = root / filename
+                  with path.open("w", encoding="utf-8") as handle:
+                      for local_index in range(count):
+                          row = {
+                              "Q": f"{site} sample question {local_index}",
+                              "A": f"Source solution {local_index}. Therefore x = {local_index}.",
+                              "meta": {
+                                  "url": f"https://{host}/questions/{question_id}/sample",
+                                  "answer_id": question_id,
+                                  "language": "en",
+                              },
+                          }
+                          handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                          question_id += 1
+
+
+          def test_pilot_sample_command_materializes_exact_5k_and_safe_manifest(tmp_path: Path) -> None:
+              source_root = tmp_path / "source"
+              _write_source_root(source_root)
+              output = tmp_path / "runtime" / "sample.jsonl"
+              manifest = tmp_path / "runtime" / "manifest.json"
+              revision = "git:" + "c" * 40
+
+              result = CliRunner().invoke(
+                  app,
+                  [
+                      "pilot",
+                      "sample",
+                      "--source-root",
+                      str(source_root),
+                      "--source-revision",
+                      revision,
+                      "--seed",
+                      "20260910",
+                      "--output",
+                      str(output),
+                      "--manifest",
+                      str(manifest),
+                  ],
+              )
+
+              assert result.exit_code == 0, result.stdout
+              rows = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+              payload = json.loads(manifest.read_text(encoding="utf-8"))
+              assert len(rows) == 5000
+              assert payload["total"] == 5000
+              assert payload["quotas"] == FIVE_K_QUOTAS
+              assert payload["seed"] == 20260910
+              assert payload["source_revisions"] == {"stackmathqa": revision}
+              assert len(payload["sampled_record_ids"]) == 5000
+              assert len(payload["sampled_raw_sha256"]) == 5000
+              assert set(payload["source_file_sha256"]) == {
+                  item[0] for item in SOURCES.values()
+              }
+              counts = Counter(str(row["metadata"]["source_site"]) for row in rows)
+              assert counts == FIVE_K_QUOTAS
+
+
+          def test_pilot_sample_command_rejects_symbolic_revision_before_writing(tmp_path: Path) -> None:
+              source_root = tmp_path / "source"
+              source_root.mkdir()
+              output = tmp_path / "sample.jsonl"
+              manifest = tmp_path / "manifest.json"
+              result = CliRunner().invoke(
+                  app,
+                  [
+                      "pilot",
+                      "sample",
+                      "--source-root",
+                      str(source_root),
+                      "--source-revision",
+                      "main",
+                      "--output",
+                      str(output),
+                      "--manifest",
+                      str(manifest),
+                  ],
+              )
+              assert result.exit_code != 0
+              assert not output.exists()
+              assert not manifest.exists()
+          PY
+
+          cat > tests/e2e/test_gold_regression.py <<'PY'
+          from __future__ import annotations
+
+          import json
+          from pathlib import Path
+
+          from college_builder.config import PipelineConfig
+          from college_builder.pipeline.runner import GatePipelineProcessor, PipelineRunner
+          from college_builder.providers.base import ModelClassificationRequest, ModelDecision
+          from college_builder.source.gold import GoldDatasetAdapter
+
+
+          class GoldRegressionProvider:
+              provider = "gold-regression"
+
+              def __init__(self, model: str) -> None:
+                  self.model = model
+
+              def classify(self, request: ModelClassificationRequest) -> ModelDecision:
+                  question = str(request.inputs.get("question", ""))
+                  answer = str(request.inputs.get("answer", ""))
+                  analysis = str(request.inputs.get("analysis", ""))
+                  if request.task == "gate_1_university_stem":
+                      return ModelDecision(
+                          label="UNIVERSITY_STEM",
+                          score=0.999,
+                          evidence_references=("question:gold",),
+                          reason_code="GOLD_UNIVERSITY_STEM",
+                      )
+                  if request.task == "gate_2_problem":
+                      return ModelDecision(
+                          label="CALCULATION",
+                          score=0.999,
+                          evidence_references=("question:gold",),
+                          reason_code="GOLD_PROBLEM",
+                      )
+                  if request.task == "gate_4_original_analysis":
+                      return ModelDecision(
+                          label="STEP_BY_STEP",
+                          score=0.999,
+                          evidence_references=(f"analysis:0-{len(analysis)}",),
+                          reason_code="GOLD_ANALYSIS",
+                      )
+                  if request.task in {
+                      "gate_5_qa_alignment",
+                      "independent_correctness_verification",
+                  }:
+                      return ModelDecision(
+                          label="PASS",
+                          score=0.999,
+                          evidence_references=(
+                              f"question:0-{len(question)}",
+                              f"answer:0-{len(answer)}",
+                              f"analysis:0-{len(analysis)}",
+                          ),
+                          reason_code="GOLD_VERIFIED",
+                      )
+                  raise AssertionError(request.task)
+
+
+          def _config() -> PipelineConfig:
+              return PipelineConfig.model_validate(
+                  {
+                      "pipeline_version": "university_dataset_builder_0.1.0",
+                      "config_version": "pilot-5k-frozen-v1",
+                      "profile": "university_stem_v1",
+                      "thresholds": {
+                          "university": 0.98,
+                          "problem": 0.98,
+                          "answer_extract": 0.995,
+                          "analysis": 0.98,
+                          "qa_alignment": 0.995,
+                      },
+                      "providers": {
+                          "classifier": {"name": "fake", "model": "gold-primary"},
+                          "verifier": {"name": "fake", "model": "gold-verifier"},
+                      },
+                      "prompt_versions": {
+                          "university_classify": "v1",
+                          "problem_classify": "v1",
+                          "analysis_classify": "v1",
+                          "qa_alignment": "v1",
+                          "correctness_verify": "v1",
+                      },
+                      "concurrency": {
+                          "acquisition": 1,
+                          "normalization": 1,
+                          "rule_gate": 1,
+                          "classifier": 1,
+                          "verifier": 1,
+                          "embedding_batch_workers": 1,
+                      },
+                  }
+              )
+
+
+          def test_stemq_scibench_cfe_gold_records_survive_complete_pipeline(tmp_path: Path) -> None:
+              for dataset, role in (
+                  ("stemq", "CALIBRATION_GOLD"),
+                  ("scibench", "TRUSTED_TRAINING"),
+                  ("cfe", "HIGH_CONFIDENCE"),
+              ):
+                  data = tmp_path / f"{dataset}.jsonl"
+                  row = {
+                      "id": f"{dataset}-gold-1",
+                      "question": "Solve 2*x + 3 = 11 for x.",
+                      "answer": "x = 4",
+                      "solution": "Subtract 3 to get 2*x = 8, then divide by 2. Therefore x = 4.",
+                  }
+                  data.write_text(json.dumps(row) + "\n", encoding="utf-8")
+                  source_config = {
+                      "dataset_name": dataset,
+                      "data_file": str(data),
+                      "source_url": f"https://gold.invalid/{dataset}",
+                      "revision": "git:" + "d" * 40,
+                      "gold_role": role,
+                      "language": "en",
+                      "field_mapping": {
+                          "source_id": "id",
+                          "question": "question",
+                          "answer": "answer",
+                          "solution": "solution",
+                      },
+                      "license_metadata": {"declared": "CC-BY-4.0"},
+                  }
+                  primary = GoldRegressionProvider("gold-primary")
+                  verifier = GoldRegressionProvider("gold-verifier")
+                  workspace = tmp_path / f"workspace-{dataset}"
+                  processor = GatePipelineProcessor(
+                      config=_config(),
+                      cache_path=workspace / "cache" / "calls.sqlite3",
+                      primary_provider=primary,
+                      verifier_provider=verifier,
+                      project_root=Path("."),
+                  )
+                  result = PipelineRunner(
+                      config=_config(), workspace=workspace, processor=processor
+                  ).run(
+                      adapter=GoldDatasetAdapter(),
+                      source_config=source_config,
+                      output_dir=tmp_path / f"output-{dataset}",
+                  )
+                  assert result.accepted_count == 1
+                  exported = json.loads(result.output_path.read_text(encoding="utf-8"))
+                  assert exported["text_answer"] == "x = 4"
+                  assert "Therefore x = 4" in exported["answer_analysis"]
+          PY
+
+          ruff format tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_sample_command.py tests/e2e/test_gold_regression.py
+          git add tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_sample_command.py tests/e2e/test_gold_regression.py
+          git config user.name lingyi9909
+          git config user.email zhanhui9909@gmail.com
+          git commit -m 'test: harden Task 15 executable pilot contracts'
+          git push origin HEAD:feature/task15-pilot-freeze
+      - name: Prove hardening RED
+        shell: bash
+        run: |
+          set +e
+          pytest tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_sample_command.py tests/e2e/test_gold_regression.py -q 2>&1 | tee /tmp/red.log
+          status=${PIPESTATUS[0]}
+          set -e
+          test "$status" -ne 0
+          grep -E 'sampled_raw_sha256|No such command|language|sample' /tmp/red.log
+      - name: Implement executable sampler, content identity, and Gold language provenance
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/college_builder/pipeline/pilot.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              'from college_builder.source.stackmathqa import stratified_sample',
+              'from college_builder.source.stackmathqa import (\n    OFFICIAL_SOURCE_FILES,\n    StackMathQAAdapter,\n    stratified_sample,\n)',
+              1,
+          )
+          text = text.replace(
+              '    sampled_record_ids: tuple[str, ...]\n    source_revisions: dict[str, str]\n',
+              '    sampled_record_ids: tuple[str, ...]\n    sampled_raw_sha256: tuple[SHA256Hex, ...]\n    source_revisions: dict[str, str]\n    source_file_sha256: dict[str, SHA256Hex] = Field(default_factory=dict)\n',
+              1,
+          )
+          text = text.replace(
+              '        if self.total != len(self.sampled_record_ids):\n            raise ValueError("pilot manifest total does not equal sampled record count")\n',
+              '        if self.total != len(self.sampled_record_ids):\n            raise ValueError("pilot manifest total does not equal sampled record count")\n        if self.total != len(self.sampled_raw_sha256):\n            raise ValueError("pilot manifest total does not equal sampled hash count")\n',
+              1,
+          )
+          text = text.replace(
+              '    record_ids = tuple(record.record_id for record in sampled)\n    digest = hashlib.sha256(\n        json.dumps(\n            {"seed": plan.seed, "quotas": plan.quotas, "record_ids": record_ids},',
+              '    record_ids = tuple(record.record_id for record in sampled)\n    raw_hashes = tuple(record.raw_sha256 for record in sampled)\n    digest = hashlib.sha256(\n        json.dumps(\n            {\n                "seed": plan.seed,\n                "quotas": plan.quotas,\n                "records": list(zip(record_ids, raw_hashes, strict=True)),\n            },',
+              1,
+          )
+          text = text.replace(
+              '        sampled_record_ids=record_ids,\n        source_revisions=dict(source_revisions),\n',
+              '        sampled_record_ids=record_ids,\n        sampled_raw_sha256=raw_hashes,\n        source_revisions=dict(source_revisions),\n',
+              1,
+          )
+          append = r'''
+
+          def sample_stackmathqa_source_root(
+              source_root: Path,
+              *,
+              source_revision: str,
+              plan: FiveKPilotPlan,
+          ) -> PilotSample:
+              """Acquire the four official local StackMathQA files and select the pilot sample."""
+              if not _IMMUTABLE_REVISION.fullmatch(source_revision):
+                  raise ValueError("pilot source revision must be explicitly immutable")
+              root = Path(source_root)
+              if not root.is_dir():
+                  raise ValueError(f"StackMathQA source root does not exist: {root}")
+              records: list[RawSourceRecord] = []
+              file_hashes: dict[str, str] = {}
+              for filename in OFFICIAL_SOURCE_FILES:
+                  source_file = root / filename
+                  if not source_file.is_file():
+                      raise ValueError(f"required StackMathQA source file is missing: {filename}")
+                  file_hashes[filename] = hashlib.sha256(source_file.read_bytes()).hexdigest()
+                  adapter = StackMathQAAdapter()
+                  descriptor = tuple(
+                      adapter.discover(
+                          {
+                              "data_file": str(source_file),
+                              "revision": source_revision,
+                              "license_metadata": {
+                                  "declared": "CC-BY-4.0",
+                                  "status": "UNREVIEWED",
+                              },
+                          }
+                      )
+                  )[0]
+                  records.extend(adapter.acquire(descriptor))
+              sample = build_pilot_sample(
+                  records,
+                  plan=plan,
+                  source_revisions={"stackmathqa": source_revision},
+              )
+              manifest = sample.manifest.model_copy(update={"source_file_sha256": file_hashes})
+              return PilotSample(records=sample.records, manifest=manifest)
+
+
+          def write_pilot_sample(
+              sample: PilotSample,
+              *,
+              output_path: Path,
+              manifest_path: Path,
+          ) -> None:
+              """Atomically materialize runtime raw sample and safe manifest to caller-selected paths."""
+              output = Path(output_path)
+              manifest = Path(manifest_path)
+              if output.resolve() == manifest.resolve():
+                  raise ValueError("pilot sample output and manifest paths must differ")
+              output.parent.mkdir(parents=True, exist_ok=True)
+              manifest.parent.mkdir(parents=True, exist_ok=True)
+              output_tmp = output.with_suffix(output.suffix + ".tmp")
+              manifest_tmp = manifest.with_suffix(manifest.suffix + ".tmp")
+              output_text = "".join(
+                  json.dumps(
+                      record.model_dump(mode="json"),
+                      ensure_ascii=False,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+                  for record in sample.records
+              )
+              manifest_text = (
+                  json.dumps(
+                      sample.manifest.model_dump(mode="json"),
+                      ensure_ascii=False,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  )
+                  + "\n"
+              )
+              output_tmp.write_text(output_text, encoding="utf-8")
+              manifest_tmp.write_text(manifest_text, encoding="utf-8")
+              output_tmp.replace(output)
+              manifest_tmp.replace(manifest)
+          '''
+          if 'def sample_stackmathqa_source_root(' not in text:
+              text += append
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/college_builder/cli.py')
+          text = path.read_text(encoding='utf-8')
+          marker = '\n\n@app.command("run")\n'
+          insertion = r'''
+
+          @pilot_app.command("sample")
+          def pilot_sample_command(
+              source_root: Annotated[
+                  Path, typer.Option("--source-root", exists=True, file_okay=False)
+              ],
+              source_revision: Annotated[str, typer.Option("--source-revision")],
+              seed: Annotated[int, typer.Option("--seed")] = 20260910,
+              output: Annotated[Path, typer.Option("--output")] = Path("artifacts/5k/sample.jsonl"),
+              manifest: Annotated[Path, typer.Option("--manifest")] = Path(
+                  "artifacts/5k/sample_manifest.json"
+              ),
+          ) -> None:
+              """Materialize the approved deterministic 5K StackMathQA runtime sample."""
+              from college_builder.pipeline.pilot import (
+                  FiveKPilotPlan,
+                  sample_stackmathqa_source_root,
+                  write_pilot_sample,
+              )
+
+              sample = sample_stackmathqa_source_root(
+                  source_root,
+                  source_revision=source_revision,
+                  plan=FiveKPilotPlan(seed=seed),
+              )
+              write_pilot_sample(sample, output_path=output, manifest_path=manifest)
+              typer.echo(
+                  json.dumps(
+                      {
+                          "manifest": str(manifest),
+                          "output": str(output),
+                          "sample_sha256": sample.manifest.sample_sha256,
+                          "seed": seed,
+                          "total": sample.manifest.total,
+                      },
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  )
+              )
+          '''
+          if '@pilot_app.command("sample")' not in text:
+              text = text.replace(marker, insertion + marker, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/college_builder/source/gold.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              '    revision: NonEmptyStr | None = None\n    license_metadata: dict[str, JsonLike] = Field(default_factory=dict)\n',
+              '    revision: NonEmptyStr | None = None\n    language: Annotated[str, Field(pattern=r"^[a-z]{2}$")] | None = None\n    license_metadata: dict[str, JsonLike] = Field(default_factory=dict)\n',
+              1,
+          )
+          text = text.replace(
+              '        metadata = gold_role_metadata(config.gold_role)\n',
+              '        metadata = gold_role_metadata(config.gold_role)\n        if config.language is not None:\n            metadata["language"] = config.language\n',
+              1,
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('artifacts/5k/run_report.json')
+          payload = json.loads(path.read_text(encoding='utf-8'))
+          payload['sampling_command'] = (
+              'college-builder pilot sample --source-root <staged-stackmathqa> '
+              '--source-revision ' + payload['source_revision'] + ' --seed 20260910 '
+              '--output artifacts/5k/sample.jsonl --manifest artifacts/5k/sample_manifest.json'
+          )
+          payload['gold_regression'] = 'PASS'
+          path.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
+          report = Path('docs/validation/5k-dry-run-report.md')
+          text = report.read_text(encoding='utf-8')
+          text += '''\n\n## Reproducible execution commands\n\n```text\ncollege-builder pilot sample --source-root <staged-stackmathqa> --source-revision git:13239ec8c8078bc8dfb43e1383069eb9be000ff7 --seed 20260910 --output artifacts/5k/sample.jsonl --manifest artifacts/5k/sample_manifest.json\ncollege-builder run --input artifacts/5k/sample.jsonl --config config/pilot-5k-frozen.yaml --workspace artifacts/5k/workspace --output artifacts/5k/output\n```\n\nThe sampling manifest records all 5,000 stable record IDs, their raw SHA-256 values, the immutable upstream revision, and SHA-256 for each of the four staged source files. Raw sampled rows are runtime-only and are not committed.\n\n## Gold regression\n\nThe Task 15 E2E regression runs representative STEMQ, SciBench, and CFE Gold records through the complete PipelineRunner and exact 19-field export. Gold source language is explicit configuration provenance rather than an inferred default. The fresh Task 15 gate must keep this regression green.\n'''
+          report.write_text(text, encoding='utf-8')
+          PY
+
+          ruff format src/college_builder/pipeline/pilot.py src/college_builder/cli.py src/college_builder/source/gold.py tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_sample_command.py tests/e2e/test_gold_regression.py
+          ruff check --fix src/college_builder/pipeline/pilot.py src/college_builder/cli.py src/college_builder/source/gold.py tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_sample_command.py tests/e2e/test_gold_regression.py
+          git diff --check
+      - name: Hardening targeted
+        run: pytest tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_5k.py tests/e2e/test_pilot_sample_command.py tests/e2e/test_gold_regression.py tests/unit/source/test_gold.py tests/unit/source/test_stackmathqa.py -q
+      - name: Full tests
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
+      - name: Push verified hardening
+        shell: bash
+        run: |
+          git add src/college_builder/pipeline/pilot.py src/college_builder/cli.py src/college_builder/source/gold.py artifacts/5k/run_report.json docs/validation/5k-dry-run-report.md tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_sample_command.py tests/e2e/test_gold_regression.py
+          git commit -m 'test: harden Task 15 executable pilot evidence'
+          git push origin HEAD:feature/task15-pilot-freeze
