@@ -1,0 +1,187 @@
+name: Task 15 DeepSeek Provider Probe
+
+on:
+  push:
+    branches:
+      - ci/task15-deepseek-provider-probe
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OPENAI_COMPATIBLE_BASE_URL: ${{ secrets.TASK15_OPENAI_BASE_URL }}
+      OPENAI_COMPATIBLE_API_KEY: ${{ secrets.TASK15_OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 83419041138b97c9ce0e3d1fd180e247b429c65b
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+
+      - name: Verify configured secrets exist without exposing values
+        shell: bash
+        run: |
+          test -n "$OPENAI_COMPATIBLE_BASE_URL"
+          test -n "$OPENAI_COMPATIBLE_API_KEY"
+          echo TASK15_PROVIDER_SECRETS_PRESENT=PASS
+
+      - name: Probe both fixed models through production provider adapter
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from college_builder.providers.base import ModelClassificationRequest
+          from college_builder.providers.openai_compatible import OpenAICompatibleStructuredModelProvider
+
+          models = ('deepseek-flash', 'deepseek-v4-pro')
+          results = []
+          request = ModelClassificationRequest(
+              task='task15_provider_probe',
+              prompt=(
+                  'Return only a JSON object with exactly these fields: '
+                  'label, score, evidence_references, reason_code. '
+                  'Use label PASS, score 1.0, evidence_references ["probe"], '
+                  'reason_code PROBE_OK.'
+              ),
+              inputs={'probe': 'provider connectivity and structured output only'},
+              allowed_labels=('PASS',),
+          )
+          for model in models:
+              provider = OpenAICompatibleStructuredModelProvider(model=model)
+              decision = provider.classify(request)
+              assert decision.label == 'PASS'
+              results.append({
+                  'provider': provider.provider,
+                  'model': provider.model,
+                  'label': decision.label,
+                  'score': decision.score,
+                  'reason_code': decision.reason_code,
+              })
+              print(f'TASK15_FIXED_MODEL_PROBE model={model} PASS')
+          Path('/tmp/task15-provider-probe.json').write_text(
+              json.dumps({'results': results}, sort_keys=True, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          PY
+
+      - name: Select four short real StackMathQA records, one per approved stratum
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from college_builder.normalize.normalizer import normalize
+          from college_builder.quality.answer import extract_source_answer
+          from college_builder.source.stackmathqa import OFFICIAL_SOURCE_FILES, StackMathQAAdapter
+
+          revision = 'git:13239ec8c8078bc8dfb43e1383069eb9be000ff7'
+          base = ('https://huggingface.co/datasets/math-ai/StackMathQA/resolve/'
+                  '13239ec8c8078bc8dfb43e1383069eb9be000ff7/'
+                  'preprocessed/stackexchange-math--1q1a')
+          selected = []
+          for filename in OFFICIAL_SOURCE_FILES:
+              adapter = StackMathQAAdapter()
+              descriptor = tuple(adapter.discover({
+                  'data_file': f'{base}/{filename}',
+                  'revision': revision,
+                  'license_metadata': {'declared': 'CC-BY-4.0', 'status': 'UPSTREAM_DECLARED'},
+              }))[0]
+              chosen = None
+              for record in adapter.acquire(descriptor):
+                  if record.metadata.get('language') != 'en':
+                      continue
+                  if len(record.raw_question) > 1600 or len(record.raw_analysis) > 3200:
+                      continue
+                  if extract_source_answer(normalize(record)).final_answer is None:
+                      continue
+                  chosen = record
+                  break
+              if chosen is None:
+                  raise RuntimeError(f'no bounded answer-extractable record found for {filename}')
+              selected.append(chosen)
+              print(f"TASK15_MICRO_SOURCE site={chosen.metadata['source_site']} id={chosen.record_id}")
+          Path('/tmp/task15-micro.jsonl').write_text(
+              ''.join(json.dumps(r.model_dump(mode='json'), ensure_ascii=False, sort_keys=True,
+                                 separators=(',', ':')) + '\n' for r in selected),
+              encoding='utf-8',
+          )
+          assert len(selected) == 4
+          PY
+
+      - name: Create temporary two-model Task 15 config
+        shell: bash
+        run: |
+          python - <<'PY'
+          import yaml
+          from pathlib import Path
+          payload = yaml.safe_load(Path('config/pilot-5k-frozen.yaml').read_text())
+          payload['config_version'] = 'pilot-5k-deepseek-micro-v1'
+          payload['providers']['classifier']['model'] = 'deepseek-flash'
+          payload['providers']['verifier']['model'] = 'deepseek-v4-pro'
+          Path('/tmp/task15-micro.yaml').write_text(
+              yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding='utf-8')
+          print('TASK15_CLASSIFIER_MODEL=deepseek-flash')
+          print('TASK15_VERIFIER_MODEL=deepseek-v4-pro')
+          PY
+
+      - name: Execute production pipeline on four real strata
+        shell: bash
+        run: |
+          college-builder run \
+            --input /tmp/task15-micro.jsonl \
+            --config /tmp/task15-micro.yaml \
+            --workspace /tmp/task15-micro-workspace \
+            --output /tmp/task15-micro-output
+
+      - name: Summarize non-content production evidence
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          run_dirs = list((Path('/tmp/task15-micro-workspace') / 'runs').iterdir())
+          assert len(run_dirs) == 1
+          report = json.loads((run_dirs[0] / 'run_report.json').read_text())
+          summary = {
+              'raw_count': report['raw_count'],
+              'accepted_count': report['accepted_count'],
+              'rejected_count': report['rejected_count'],
+              'reject_reason_counts': report['reject_reason_counts'],
+              'funnel': report['funnel'],
+              'provider_call_counts': report['provider_call_counts'],
+              'pipeline_provider_errors': report['provider_errors'],
+              'fallback_count': report['fallback_count'],
+              'classifier': {'provider': 'openai_compatible', 'model': 'deepseek-flash'},
+              'verifier': {'provider': 'openai_compatible', 'model': 'deepseek-v4-pro'},
+          }
+          assert summary['raw_count'] == 4
+          assert summary['pipeline_provider_errors'] == 0
+          Path('/tmp/task15-deepseek-micro-summary.json').write_text(
+              json.dumps(summary, sort_keys=True, indent=2) + '\n', encoding='utf-8')
+          print('TASK15_DEEPSEEK_MICRO=' + json.dumps(summary, sort_keys=True))
+          print('TASK15_PRODUCTION_MICRO=PASS')
+          PY
+
+      - name: Retain only non-content evidence
+        shell: bash
+        run: |
+          cp "$(find /tmp/task15-micro-workspace/runs -name run_report.json -print -quit)" /tmp/task15-micro-run-report.json
+          ! grep -Eq 'raw_question|raw_answer|raw_analysis|raw_payload' /tmp/task15-deepseek-micro-summary.json
+          echo TASK15_ARTIFACT_SAFETY=PASS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: task15-deepseek-provider-probe-evidence
+          path: |
+            /tmp/task15-provider-probe.json
+            /tmp/task15-deepseek-micro-summary.json
+            /tmp/task15-micro-run-report.json
+          if-no-files-found: error
+          retention-days: 30
