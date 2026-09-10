@@ -1,0 +1,29 @@
+name: Task 15 Provider Resilience GREEN
+
+on:
+  push:
+    branches:
+      - ci/task15-provider-resilience-green
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cf49a9815f14f1b1b6619fa4c5e8018e133bd5b6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Targeted provider resilience tests
+        run: pytest -q tests/unit/providers/test_openai_compatible.py tests/unit/providers/test_openai_compatible_resilience.py tests/unit/test_config.py tests/unit/test_provider_config_resilience.py
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
