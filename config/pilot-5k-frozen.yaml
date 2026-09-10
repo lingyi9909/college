@@ -23,7 +23,7 @@ providers:
 prompt_versions:
   university_classify: v1
   problem_classify: v1
-  analysis_classify: v1
+  analysis_classify: v2
   qa_alignment: v1
   correctness_verify: v1
 concurrency:
