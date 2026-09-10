@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   certify:
-    if: github.event.head_commit.message == 'ci: trigger final Task 15 certification'
+    if: "${{ github.event.head_commit.message == 'ci: trigger final Task 15 certification' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -67,7 +67,9 @@ jobs:
           assert report['prompt_versions']['analysis_classify'] == 'v2'
           assert report['config_sha256'] == config_sha
           assert report['raw_rows_committed'] is False
-          reject_counts = report.get('metrics', {}).get('reject_reason_counts', report.get('reject_reason_counts', {}))
+          reject_counts = report.get('metrics', {}).get(
+              'reject_reason_counts', report.get('reject_reason_counts', {})
+          )
           assert 'VERIFIER_NOT_INDEPENDENT' not in reject_counts
           print('TASK15_FORMAL_EVIDENCE_IDENTITY=PASS')
           PY
