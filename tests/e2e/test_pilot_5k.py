@@ -49,7 +49,20 @@ def test_task15_report_and_summary_are_non_raw_and_self_consistent() -> None:
     assert isinstance(summary["sampling"]["seed"], int)
     assert len(summary["config_sha256"]) == 64
     assert summary["config_version"] == "pilot-5k-frozen-v1"
-    assert summary["status"] in {"EXECUTED", "BLOCKED_EXTERNAL_PROVIDER"}
+    assert summary["status"] in {
+        "EXECUTED",
+        "BLOCKED_EXTERNAL_PROVIDER",
+        "BLOCKED_STABLE_PROVIDER_IDENTITY",
+    }
     assert summary["status"] in report
     assert summary["source_revision"] in report
     assert summary["config_sha256"] in report
+
+    if summary["status"] == "BLOCKED_STABLE_PROVIDER_IDENTITY":
+        execution = summary["provider_execution_evidence"]
+        auto = execution["copilot_auto_micro_run"]
+        fixed = execution["copilot_fixed_model_diagnostics"]
+        assert auto["pipeline_provider_errors"] == 0
+        assert auto["model_identity_freezeable"] is False
+        assert fixed["explicit_model_success_count"] == 0
+        assert summary["required_unblock"]
