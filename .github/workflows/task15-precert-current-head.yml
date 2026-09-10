@@ -1,0 +1,72 @@
+name: Task 15 Pre-Cert Current Head
+
+on:
+  push:
+    branches:
+      - ci/task15-precert-current-head
+
+permissions:
+  contents: read
+
+jobs:
+  precert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3d1c047563d34d3de9bed01200256a50d84fb435
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+
+      - name: Verify frozen config identity
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import yaml
+          from pathlib import Path
+          p = Path('config/pilot-5k-frozen.yaml')
+          digest = hashlib.sha256(p.read_bytes()).hexdigest()
+          assert digest == '24749a95a1faf84f909911f4f4fc0c59ee5b514c63b4f440efa64b2ea165fcf3', digest
+          c = yaml.safe_load(p.read_text(encoding='utf-8'))
+          assert c['thresholds'] == {'university': 0.98, 'problem': 0.98, 'answer_extract': 0.995, 'analysis': 0.98, 'qa_alignment': 0.995}
+          assert c['providers']['classifier']['model'] == 'deepseek-flash'
+          assert c['providers']['verifier']['model'] == 'deepseek-v4-pro'
+          assert c['prompt_versions']['analysis_classify'] == 'v2'
+          print('TASK15_CONFIG_IDENTITY=PASS')
+          PY
+
+      - name: Gold regression
+        run: pytest -q tests/e2e/test_gold_regression.py
+
+      - name: Task 15 focused regressions
+        run: >-
+          pytest -q
+          tests/e2e/test_pilot_5k.py
+          tests/e2e/test_pilot_sample_command.py
+          tests/e2e/test_task15_pipeline_concurrency.py
+          tests/e2e/test_task15_provider_prompt_protocol.py
+          tests/unit/providers/test_openai_compatible_resilience.py
+          tests/unit/test_provider_config_resilience.py
+
+      - name: Full pytest
+        run: pytest -q
+
+      - name: Ruff
+        run: ruff check src tests
+
+      - name: MyPy
+        run: mypy src
+
+      - name: Scope and raw-data guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! git ls-files | grep -Eq '^artifacts/5k/(sample\.jsonl|output/|workspace/)'
+          ! git ls-files | grep -Eq '^\.github/workflows/task15-(formal-5k|deepseek|cancel|post5k|monitor|precert)'
+          git diff --exit-code
+          echo TASK15_PRECERT_SCOPE_AND_RAW_GUARDS=PASS
