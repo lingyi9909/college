@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 934be6daba7598ab735a4d6d854a17ab3cb60b5e
+          ref: 3d1c047563d34d3de9bed01200256a50d84fb435
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -93,7 +93,7 @@ jobs:
           assert len(run_dirs) == 1
           report = json.loads((run_dirs[0] / 'run_report.json').read_text(encoding='utf-8'))
           summary = {
-              'feature_sha': '934be6daba7598ab735a4d6d854a17ab3cb60b5e',
+              'feature_sha': '3d1c047563d34d3de9bed01200256a50d84fb435',
               'sample': {'math': 8, 'physics': 4, 'statistics': 4, 'mathoverflow': 4},
               'raw_count': report['raw_count'],
               'accepted_count': report['accepted_count'],
