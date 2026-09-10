@@ -1,0 +1,34 @@
+name: Task 14 Review Dev RED
+on:
+  push:
+    branches:
+      - ci/task14-review-red
+jobs:
+  red:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: da7f7202a458a2643290d4f9d89fc121fa8e5792
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - run: git rev-parse HEAD
+      - name: Prove review contract is RED
+        shell: bash
+        run: |
+          set +e
+          pytest \
+            tests/e2e/test_pipeline_report.py::test_source_and_subject_distributions_include_the_complete_funnel \
+            tests/e2e/test_pipeline_resume.py::test_problem_reject_keeps_reliable_subject_from_source_metadata \
+            tests/e2e/test_pipeline_resume.py::test_revisionless_source_content_change_creates_new_snapshot_and_run \
+            tests/e2e/test_pipeline_resume.py::test_revisionless_identical_content_keeps_identity_and_reuses_downstream \
+            tests/e2e/test_pipeline_resume.py::test_integrity_reject_persists_full_evidence_and_resume_uses_it \
+            tests/e2e/test_pipeline_resume.py::test_model_and_duplicate_rejects_persist_identity_and_context -q
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            echo 'Expected RED but review contract tests passed'
+            exit 1
+          fi
+          exit 0
