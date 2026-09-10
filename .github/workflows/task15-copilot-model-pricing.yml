@@ -1,0 +1,73 @@
+name: Task 15 Copilot Model Pricing
+
+on:
+  push:
+    branches:
+      - ci/task15-copilot-model-pricing
+
+permissions:
+  contents: read
+  copilot-requests: write
+
+jobs:
+  pricing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Copilot SDK
+        run: python -m pip install github-copilot-sdk
+      - name: List eligible model pricing without account quota
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import asyncio
+          import json
+
+          from copilot import CopilotClient
+          from copilot.rpc import ModelsListRequest
+
+          async def main() -> None:
+              client = CopilotClient()
+              await client.start()
+              try:
+                  result = await client.rpc.models.list(ModelsListRequest())
+                  rows = []
+                  for model in result.models:
+                      billing = model.billing
+                      prices = billing.token_prices if billing else None
+                      if prices is None:
+                          continue
+                      rows.append(
+                          {
+                              'id': model.id,
+                              'input_price': prices.input_price,
+                              'output_price': prices.output_price,
+                              'batch_size': prices.batch_size,
+                              'multiplier': billing.multiplier if billing else 1,
+                          }
+                      )
+                  rows.sort(
+                      key=lambda row: (
+                          row['input_price'] + row['output_price'],
+                          row['multiplier'],
+                          row['id'],
+                      )
+                  )
+                  print('COPILOT_PRICED_MODELS=' + json.dumps(rows, sort_keys=True))
+                  for row in rows[:10]:
+                      print(
+                          'MODEL_PRICE '
+                          f"id={row['id']} input={row['input_price']} "
+                          f"output={row['output_price']} per={row['batch_size']} "
+                          f"multiplier={row['multiplier']}"
+                      )
+              finally:
+                  await client.stop()
+
+          asyncio.run(main())
+          PY
