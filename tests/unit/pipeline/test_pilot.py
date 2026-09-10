@@ -100,3 +100,23 @@ def test_freeze_pipeline_config_is_byte_stable_and_changes_version(tmp_path: Pat
     assert target.read_bytes() == first_bytes
     assert first_hash == second_hash == hashlib.sha256(first_bytes).hexdigest()
     assert b"config_version: pilot-5k-frozen-v1" in first_bytes
+
+
+def test_sample_identity_changes_when_same_record_id_content_hash_changes() -> None:
+    plan = FiveKPilotPlan(
+        seed=9,
+        quotas={"math": 1, "physics": 1, "statistics": 1, "mathoverflow": 1},
+    )
+    records = [_record(site, 1) for site in plan.quotas]
+    revision = "git:" + "b" * 40
+    first = build_pilot_sample(records, plan=plan, source_revisions={"stackmathqa": revision})
+    changed = records[0].model_copy(update={"raw_sha256": "f" * 64})
+    second = build_pilot_sample(
+        [changed, *records[1:]],
+        plan=plan,
+        source_revisions={"stackmathqa": revision},
+    )
+
+    assert first.manifest.sampled_record_ids == second.manifest.sampled_record_ids
+    assert first.manifest.sample_sha256 != second.manifest.sample_sha256
+    assert first.manifest.sampled_raw_sha256 != second.manifest.sampled_raw_sha256
