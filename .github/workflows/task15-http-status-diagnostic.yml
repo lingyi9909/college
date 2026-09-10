@@ -75,10 +75,11 @@ jobs:
           print('TASK15_MICRO_SAMPLE=PASS')
           PY
 
-      - name: Run production pipeline with sanitized HTTP status instrumentation
+      - name: Run production pipeline with sanitized HTTP 400 classification
         shell: bash
         run: |
           python - <<'PY'
+          import hashlib
           import json
           from pathlib import Path
           import httpx
@@ -90,15 +91,67 @@ jobs:
           original = OpenAICompatibleStructuredModelProvider.classify
           events = []
 
+          def classify_message(message: str) -> list[str]:
+              text = message.lower()
+              rules = {
+                  'CONTEXT_LENGTH': ('context length', 'maximum context', 'too many tokens', 'token limit'),
+                  'PAYLOAD_TOO_LARGE': ('payload too large', 'request too large', 'body too large'),
+                  'RESPONSE_FORMAT': ('response_format', 'response format', 'json mode', 'json_object'),
+                  'MODEL_CAPABILITY': ('model does not support', 'model not support', 'unsupported model'),
+                  'INVALID_PARAMETER': ('invalid parameter', 'invalid request', 'parameter is invalid'),
+                  'TEMPERATURE': ('temperature',),
+                  'CONTENT_POLICY': ('content policy', 'moderation', 'safety policy', 'unsafe content'),
+                  'QUOTA': ('quota', 'credit', 'balance'),
+                  'RATE_LIMIT': ('rate limit', 'too many requests'),
+              }
+              return [name for name, needles in rules.items() if any(n in text for n in needles)] or ['UNKNOWN']
+
           def instrumented(self, request):
               try:
                   return original(self, request)
               except httpx.HTTPStatusError as exc:
+                  error_type = None
+                  error_code = None
+                  error_param = None
+                  message = ''
+                  try:
+                      body = exc.response.json()
+                      if isinstance(body, dict):
+                          error = body.get('error')
+                          if isinstance(error, dict):
+                              for key, target in (('type', 'type'), ('code', 'code'), ('param', 'param')):
+                                  value = error.get(key)
+                                  if value is not None and isinstance(value, (str, int, float, bool)):
+                                      if target == 'type': error_type = str(value)
+                                      elif target == 'code': error_code = str(value)
+                                      else: error_param = str(value)
+                              if isinstance(error.get('message'), str):
+                                  message = error['message']
+                  except Exception:
+                      pass
+                  inputs = request.inputs if isinstance(request.inputs, dict) else {}
+                  input_lengths = {
+                      key: len(value)
+                      for key, value in inputs.items()
+                      if key in {'question', 'answer', 'analysis'} and isinstance(value, str)
+                  }
                   events.append({
                       'exception_type': type(exc).__name__,
                       'model': self.model,
                       'task': request.task,
                       'status_code': exc.response.status_code,
+                      'error_type': error_type,
+                      'error_code': error_code,
+                      'error_param': error_param,
+                      'message_categories': classify_message(message),
+                      'message_length': len(message),
+                      'message_sha256': hashlib.sha256(message.encode('utf-8')).hexdigest() if message else None,
+                      'input_lengths': input_lengths,
+                      'request_json_bytes': len(json.dumps({
+                          'task': request.task,
+                          'inputs': request.inputs,
+                          'allowed_labels': list(request.allowed_labels),
+                      }, ensure_ascii=False, sort_keys=True).encode('utf-8')),
                   })
                   raise
               except Exception as exc:
