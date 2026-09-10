@@ -1,0 +1,140 @@
+name: Task 15 Formal 5K Production Run
+
+on:
+  push:
+    branches:
+      - ci/task15-formal-5k
+
+permissions:
+  contents: read
+
+jobs:
+  run5k:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      OPENAI_COMPATIBLE_BASE_URL: ${{ secrets.TASK15_OPENAI_BASE_URL }}
+      OPENAI_COMPATIBLE_API_KEY: ${{ secrets.TASK15_OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3d1c047563d34d3de9bed01200256a50d84fb435
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+
+      - name: Materialize exact approved 5K sample
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          from college_builder.pipeline.pilot import FIVE_K_QUOTAS, FiveKPilotPlan, build_pilot_sample
+          from college_builder.source.stackmathqa import OFFICIAL_SOURCE_FILES, StackMathQAAdapter
+
+          revision = '13239ec8c8078bc8dfb43e1383069eb9be000ff7'
+          revision_token = f'git:{revision}'
+          base = (
+              'https://huggingface.co/datasets/math-ai/StackMathQA/resolve/'
+              f'{revision}/preprocessed/stackexchange-math--1q1a'
+          )
+
+          def records():
+              for filename in OFFICIAL_SOURCE_FILES:
+                  adapter = StackMathQAAdapter()
+                  descriptor = tuple(adapter.discover({
+                      'data_file': f'{base}/{filename}',
+                      'revision': revision_token,
+                      'license_metadata': {'declared': 'CC-BY-4.0', 'status': 'UPSTREAM_DECLARED'},
+                  }))[0]
+                  yield from adapter.acquire(descriptor)
+
+          sample = build_pilot_sample(
+              records(),
+              plan=FiveKPilotPlan(seed=20260910),
+              source_revisions={'stackmathqa': revision_token},
+          )
+          counts = Counter(str(record.metadata['source_site']) for record in sample.records)
+          assert sample.manifest.total == 5000
+          assert dict(counts) == FIVE_K_QUOTAS
+          assert sample.manifest.sample_sha256 == 'e9d7b957a092114da35dbb839319a08ab555692a8a06863faf2b1980c2a681c5'
+
+          sample_path = Path('/tmp/task15-formal-5k.jsonl')
+          sample_path.write_text(
+              ''.join(
+                  json.dumps(r.model_dump(mode='json'), ensure_ascii=False, sort_keys=True, separators=(',', ':')) + '\n'
+                  for r in sample.records
+              ), encoding='utf-8')
+          assert hashlib.sha256(sample_path.read_bytes()).hexdigest() == sample.manifest.sample_sha256
+          Path('/tmp/task15-formal-5k-manifest.json').write_text(
+              json.dumps(sample.manifest.model_dump(mode='json'), sort_keys=True, indent=2) + '\n',
+              encoding='utf-8')
+          print('TASK15_FORMAL_5K_SAMPLE=PASS')
+          PY
+
+      - name: Execute formal production pipeline on 5K
+        shell: bash
+        run: |
+          college-builder run \
+            --input /tmp/task15-formal-5k.jsonl \
+            --config config/pilot-5k-frozen.yaml \
+            --workspace /tmp/task15-formal-5k-workspace \
+            --output /tmp/task15-formal-5k-output
+
+      - name: Summarize formal non-content evidence
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          runs_root = Path('/tmp/task15-formal-5k-workspace/runs')
+          run_dirs = list(runs_root.iterdir()) if runs_root.exists() else []
+          summary = {
+              'feature_sha': '3d1c047563d34d3de9bed01200256a50d84fb435',
+              'sample_sha256': 'e9d7b957a092114da35dbb839319a08ab555692a8a06863faf2b1980c2a681c5',
+              'seed': 20260910,
+              'sample': {'math': 2000, 'physics': 1000, 'statistics': 1000, 'mathoverflow': 1000},
+              'classifier_model': 'deepseek-flash',
+              'verifier_model': 'deepseek-v4-pro',
+          }
+          if len(run_dirs) == 1 and (run_dirs[0] / 'run_report.json').exists():
+              report = json.loads((run_dirs[0] / 'run_report.json').read_text(encoding='utf-8'))
+              for key in (
+                  'raw_count','accepted_count','rejected_count','acceptance_rate','funnel',
+                  'reject_reason_counts','provider_call_counts','provider_errors',
+                  'provider_latency_seconds','wall_time_seconds','tokens','estimated_cost_usd'
+              ):
+                  if key in report:
+                      summary[key] = report[key]
+              summary['status'] = 'EXECUTED'
+          else:
+              summary['status'] = 'INCOMPLETE_NO_REPORT'
+          Path('/tmp/task15-formal-5k-summary.json').write_text(
+              json.dumps(summary, sort_keys=True, indent=2) + '\n', encoding='utf-8')
+          print('TASK15_FORMAL_5K_SUMMARY=' + json.dumps(summary, sort_keys=True))
+          PY
+
+      - name: Artifact safety
+        if: always()
+        shell: bash
+        run: |
+          ! grep -Eq 'raw_question|raw_answer|raw_analysis|raw_payload' /tmp/task15-formal-5k-summary.json
+          echo TASK15_FORMAL_5K_ARTIFACT_SAFETY=PASS
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: task15-formal-5k-evidence
+          path: |
+            /tmp/task15-formal-5k-manifest.json
+            /tmp/task15-formal-5k-summary.json
+          if-no-files-found: warn
+          retention-days: 30
