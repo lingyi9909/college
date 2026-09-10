@@ -97,9 +97,7 @@ def build_pilot_report(
         "after_dedup": sum(row.after_dedup for row in rows),
         "final_accepted": accepted_count,
     }
-    reject_reasons = Counter(
-        row.reject_reason for row in rows if row.reject_reason is not None
-    )
+    reject_reasons = Counter(row.reject_reason for row in rows if row.reject_reason is not None)
     total_cache = provider_usage.cache_hits + provider_usage.cache_misses
 
     return PilotReport(

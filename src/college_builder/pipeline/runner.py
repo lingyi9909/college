@@ -162,9 +162,7 @@ class _CachedStructuredProvider:
             raw: object = self._provider.classify(request)
             if not isinstance(raw, ModelDecision):
                 raise TypeError("provider returned non-ModelDecision output")
-            validated = ModelDecision.model_validate(
-                raw.model_dump(mode="python", warnings=False)
-            )
+            validated = ModelDecision.model_validate(raw.model_dump(mode="python", warnings=False))
         except Exception:
             self._usage.provider_errors += 1
             raise
@@ -209,9 +207,7 @@ class GatePipelineProcessor:
             "gate_4_original_analysis": _hash_json(
                 {"pass_threshold": config.thresholds.analysis, "verify_threshold": 0.90}
             ),
-            "gate_5_qa_alignment": _hash_json(
-                {"pass_threshold": config.thresholds.qa_alignment}
-            ),
+            "gate_5_qa_alignment": _hash_json({"pass_threshold": config.thresholds.qa_alignment}),
             "independent_correctness_verification": _hash_json(
                 {"verification_contract": "correctness_v1"}
             ),
@@ -350,7 +346,9 @@ class GatePipelineProcessor:
             parsed = AnalysisType(analysis_type)
         except ValueError:
             return _AnalysisOutcome(None, result.evidence, "ANALYSIS_UNCERTAIN")
-        return _AnalysisOutcome(AnalysisContent(raw=candidate.analysis, type=parsed), result.evidence, None)
+        return _AnalysisOutcome(
+            AnalysisContent(raw=candidate.analysis, type=parsed), result.evidence, None
+        )
 
     def verify(self, candidate: NormalizedQA) -> _VerificationOutcome:
         context = GateContext(config_version=self.config.config_version)
@@ -537,9 +535,7 @@ class PipelineRunner:
             evidence[raw.record_id].extend(outcome.evidence)
             if outcome.reject_reason is not None or outcome.classification is None:
                 reason = outcome.reject_reason or "UNIVERSITY_LEVEL_UNCERTAIN"
-                self._mark_rejected(
-                    state, run_id, run_dir, raw.record_id, reason, rejected, audits
-                )
+                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)
                 continue
             classifications[raw.record_id] = outcome.classification
             fp = self._classification_fingerprint(candidate)
@@ -564,9 +560,7 @@ class PipelineRunner:
             evidence[raw.record_id].extend(outcome.evidence)
             if outcome.reject_reason is not None or outcome.answer is None:
                 reason = outcome.reject_reason or "ANSWER_NOT_EXTRACTABLE"
-                self._mark_rejected(
-                    state, run_id, run_dir, raw.record_id, reason, rejected, audits
-                )
+                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)
                 continue
             answers[raw.record_id] = outcome.answer
             fp = _hash_json(
@@ -594,9 +588,7 @@ class PipelineRunner:
             evidence[raw.record_id].extend(outcome.evidence)
             if outcome.reject_reason is not None or outcome.analysis is None:
                 reason = outcome.reject_reason or "ANALYSIS_UNCERTAIN"
-                self._mark_rejected(
-                    state, run_id, run_dir, raw.record_id, reason, rejected, audits
-                )
+                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)
                 continue
             analyses[raw.record_id] = outcome.analysis
             fp = self._analysis_fingerprint(candidate)
@@ -716,10 +708,12 @@ class PipelineRunner:
                 )
                 to_final_record(ir)
             except ValueError as exc:
-                reason = "LANGUAGE_UNRESOLVED" if str(exc) == "LANGUAGE_UNRESOLVED" else "SCHEMA_VALIDATION_FAILED"
-                self._mark_rejected(
-                    state, run_id, run_dir, raw.record_id, reason, rejected, audits
+                reason = (
+                    "LANGUAGE_UNRESOLVED"
+                    if str(exc) == "LANGUAGE_UNRESOLVED"
+                    else "SCHEMA_VALIDATION_FAILED"
                 )
+                self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)
                 continue
 
             accepted_fp = _hash_json({"ir": ir.model_dump(mode="json")})
@@ -739,9 +733,7 @@ class PipelineRunner:
         self._interrupt_if_requested(run_id, interrupt_after, RunStage.ACCEPTED)
 
         accepted_irs = [
-            accepted_by_id[raw.record_id]
-            for raw in raw_records
-            if raw.record_id in accepted_by_id
+            accepted_by_id[raw.record_id] for raw in raw_records if raw.record_id in accepted_by_id
         ]
         output_path = export_jsonl(
             (ExportRecord(ir=ir, stage=RunStage.ACCEPTED) for ir in accepted_irs),
@@ -951,9 +943,7 @@ class PipelineRunner:
         analysis: AnalysisContent,
         evidence: tuple[GateResultEvidence, ...],
     ) -> UniversityQuestionIR:
-        if candidate.images and any(
-            not image.startswith("image/") for image in candidate.images
-        ):
+        if candidate.images and any(not image.startswith("image/") for image in candidate.images):
             raise ValueError("unresolved source image cannot enter formal Task 14 export")
         language = _metadata_text(candidate, "language")
         if language is None or len(language) != 2 or language.lower() != language:
@@ -1280,7 +1270,11 @@ def _classification_from_json(value: object) -> Classification:
     level = value.get("level")
     problem_type = value.get("problem_type")
     course = value.get("course")
-    if not isinstance(discipline, str) or not isinstance(level, str) or not isinstance(problem_type, str):
+    if (
+        not isinstance(discipline, str)
+        or not isinstance(level, str)
+        or not isinstance(problem_type, str)
+    ):
         raise ValueError("classification artifact enum values must be strings")
     if course is not None and not isinstance(course, str):
         raise ValueError("classification artifact course must be text or null")

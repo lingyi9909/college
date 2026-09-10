@@ -63,9 +63,7 @@ class _LocalJsonlAdapter:
 def _provider(config: ProviderConfig) -> StructuredModelProvider:
     if config.name == "openai_compatible":
         return OpenAICompatibleStructuredModelProvider(model=config.model)
-    raise ValueError(
-        "the fake provider is test-only; CLI run/resume requires openai_compatible"
-    )
+    raise ValueError("the fake provider is test-only; CLI run/resume requires openai_compatible")
 
 
 def _runner(config: PipelineConfig, workspace: Path) -> PipelineRunner:

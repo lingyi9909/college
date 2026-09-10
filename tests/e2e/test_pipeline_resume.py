@@ -22,7 +22,9 @@ from college_builder.storage.state import RunStage
 
 
 class CountingAdapter:
-    def __init__(self, records: tuple[RawSourceRecord, ...], *, revision: str = "fixture-v1") -> None:
+    def __init__(
+        self, records: tuple[RawSourceRecord, ...], *, revision: str = "fixture-v1"
+    ) -> None:
         self.records = records
         self.revision = revision
         self.discover_calls = 0
