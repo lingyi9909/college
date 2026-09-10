@@ -603,3 +603,91 @@ def test_language_reject_persists_deterministic_context(tmp_path: Path) -> None:
     assert rejection["prompt_version"] == "not_applicable"
     assert rejection["details"]
     assert rejection["evidence"][0]["reason_code"] == "LANGUAGE_UNRESOLVED"
+
+
+@pytest.mark.parametrize("revision", ["main", "master", "latest", "dev", "release-v1"])
+def test_mutable_symbolic_source_revision_does_not_authorize_snapshot_cache(
+    tmp_path: Path, revision: str
+) -> None:
+    config = _config()
+    workspace = tmp_path / revision
+    first_adapter = CountingAdapter(
+        (_record(1, "VALID", question_override="Q1: Calculate 1 + 1"),),
+        revision=revision,
+    )
+    first = _runner(config=config, workspace=workspace).run(
+        adapter=first_adapter,
+        source_config={},
+        output_dir=tmp_path / f"{revision}-first",
+    )
+
+    second_adapter = CountingAdapter(
+        (_record(1, "VALID", question_override="Q2: Calculate 2 + 2"),),
+        revision=revision,
+    )
+    second = _runner(config=config, workspace=workspace).run(
+        adapter=second_adapter,
+        source_config={},
+        output_dir=tmp_path / f"{revision}-second",
+    )
+    output = json.loads(second.output_path.read_text(encoding="utf-8").splitlines()[0])
+
+    assert first_adapter.acquire_calls == 1
+    assert second_adapter.acquire_calls == 1
+    assert first.run_id != second.run_id
+    assert "Q2" in output["text_question"]
+    assert "Q1" not in output["text_question"]
+
+
+def test_explicit_immutable_revision_can_reuse_acquisition_snapshot(tmp_path: Path) -> None:
+    config = _config()
+    workspace = tmp_path / "immutable-same"
+    revision = "sha256:" + "a" * 64
+    records = (_record(1, "VALID"),)
+    first_adapter = CountingAdapter(records, revision=revision)
+    first = _runner(config=config, workspace=workspace).run(
+        adapter=first_adapter,
+        source_config={},
+        output_dir=tmp_path / "immutable-first",
+    )
+
+    second_adapter = CountingAdapter(records, revision=revision)
+    second = _runner(config=config, workspace=workspace).run(
+        adapter=second_adapter,
+        source_config={},
+        output_dir=tmp_path / "immutable-second",
+    )
+
+    assert first.run_id == second.run_id
+    assert first_adapter.acquire_calls == 1
+    assert second_adapter.acquire_calls == 0
+
+
+def test_explicit_immutable_revision_change_creates_new_snapshot_and_run(tmp_path: Path) -> None:
+    config = _config()
+    workspace = tmp_path / "immutable-change"
+    first_adapter = CountingAdapter(
+        (_record(1, "VALID", question_override="Q1: Calculate 1 + 1"),),
+        revision="sha256:" + "a" * 64,
+    )
+    first = _runner(config=config, workspace=workspace).run(
+        adapter=first_adapter,
+        source_config={},
+        output_dir=tmp_path / "immutable-change-first",
+    )
+
+    second_adapter = CountingAdapter(
+        (_record(1, "VALID", question_override="Q2: Calculate 2 + 2"),),
+        revision="sha256:" + "b" * 64,
+    )
+    second = _runner(config=config, workspace=workspace).run(
+        adapter=second_adapter,
+        source_config={},
+        output_dir=tmp_path / "immutable-change-second",
+    )
+    output = json.loads(second.output_path.read_text(encoding="utf-8").splitlines()[0])
+
+    assert first_adapter.acquire_calls == 1
+    assert second_adapter.acquire_calls == 1
+    assert first.run_id != second.run_id
+    assert "Q2" in output["text_question"]
