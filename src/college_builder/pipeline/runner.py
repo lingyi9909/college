@@ -41,7 +41,12 @@ from college_builder.quality.analysis import AnalysisGate
 from college_builder.quality.answer import AnswerGate
 from college_builder.quality.classify import ProblemGate, UniversityStemGate
 from college_builder.quality.dedup import DedupItem, ExactDeduper
-from college_builder.quality.engine import GateContext, GateEngine, GateResultEvidence
+from college_builder.quality.engine import (
+    GateContext,
+    GateEngine,
+    GateResultEvidence,
+    QualityGate,
+)
 from college_builder.quality.integrity import IntegrityGate
 from college_builder.quality.verify import AlignmentGate, CorrectnessVerifier
 from college_builder.reporting.pilot_report import (
@@ -279,12 +284,14 @@ class GatePipelineProcessor:
             config_version=self.config.config_version,
             raw_records={raw.record_id: raw},
         )
-        result = GateEngine(gates=(self._integrity,), context=context).run(candidate)
+        result = GateEngine[NormalizedQA](gates=(self._integrity,), context=context).run(candidate)
         return result.evidence[-1]
 
     def classify(self, candidate: NormalizedQA) -> _ClassificationOutcome:
         context = GateContext(config_version=self.config.config_version)
-        university = GateEngine(gates=(self._university,), context=context).run(candidate)
+        university = GateEngine[NormalizedQA](
+            gates=(cast(QualityGate[NormalizedQA], self._university),), context=context
+        ).run(candidate)
         university_evidence = university.evidence[-1]
         if university.verdict is GateVerdict.REJECT:
             return _ClassificationOutcome(
@@ -292,7 +299,9 @@ class GatePipelineProcessor:
                 evidence=university.evidence,
                 reject_reason=university_evidence.reason_code,
             )
-        problem = GateEngine(gates=(self._problem,), context=context).run(candidate)
+        problem = GateEngine[NormalizedQA](
+            gates=(cast(QualityGate[NormalizedQA], self._problem),), context=context
+        ).run(candidate)
         evidence = (*university.evidence, *problem.evidence)
         problem_evidence = problem.evidence[-1]
         if problem.verdict is GateVerdict.REJECT:
@@ -318,7 +327,7 @@ class GatePipelineProcessor:
 
     def answer(self, candidate: NormalizedQA) -> _AnswerOutcome:
         context = GateContext(config_version=self.config.config_version)
-        result = GateEngine(gates=(self._answer,), context=context).run(candidate)
+        result = GateEngine[NormalizedQA](gates=(self._answer,), context=context).run(candidate)
         evidence = result.evidence[-1]
         if result.verdict is GateVerdict.REJECT:
             return _AnswerOutcome(None, result.evidence, evidence.reason_code)
@@ -335,7 +344,7 @@ class GatePipelineProcessor:
 
     def analysis(self, candidate: NormalizedQA) -> _AnalysisOutcome:
         context = GateContext(config_version=self.config.config_version)
-        result = GateEngine(gates=(self._analysis,), context=context).run(candidate)
+        result = GateEngine[NormalizedQA](gates=(self._analysis,), context=context).run(candidate)
         evidence = result.evidence[-1]
         if result.verdict is GateVerdict.REJECT:
             return _AnalysisOutcome(None, result.evidence, evidence.reason_code)
@@ -352,7 +361,9 @@ class GatePipelineProcessor:
 
     def verify(self, candidate: NormalizedQA) -> _VerificationOutcome:
         context = GateContext(config_version=self.config.config_version)
-        alignment = GateEngine(gates=(self._alignment,), context=context).run(candidate)
+        alignment = GateEngine[NormalizedQA](gates=(self._alignment,), context=context).run(
+            candidate
+        )
         alignment_evidence = alignment.evidence[-1]
         if alignment.verdict is GateVerdict.REJECT:
             return _VerificationOutcome(
@@ -361,7 +372,9 @@ class GatePipelineProcessor:
                 False,
                 False,
             )
-        correctness = GateEngine(gates=(self._correctness,), context=context).run(candidate)
+        correctness = GateEngine[NormalizedQA](gates=(self._correctness,), context=context).run(
+            candidate
+        )
         evidence = (*alignment.evidence, *correctness.evidence)
         correctness_evidence = correctness.evidence[-1]
         if correctness.verdict is GateVerdict.REJECT:
@@ -531,19 +544,24 @@ class PipelineRunner:
             if raw.record_id in rejected or raw.record_id in terminal_accepted:
                 continue
             candidate = normalized[raw.record_id]
-            outcome = self._stage_classification(run_dir, raw.record_id, candidate)
-            evidence[raw.record_id].extend(outcome.evidence)
-            if outcome.reject_reason is not None or outcome.classification is None:
-                reason = outcome.reject_reason or "UNIVERSITY_LEVEL_UNCERTAIN"
+            classification_outcome = self._stage_classification(run_dir, raw.record_id, candidate)
+            evidence[raw.record_id].extend(classification_outcome.evidence)
+            if (
+                classification_outcome.reject_reason is not None
+                or classification_outcome.classification is None
+            ):
+                reason = classification_outcome.reject_reason or "UNIVERSITY_LEVEL_UNCERTAIN"
                 self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)
                 continue
-            classifications[raw.record_id] = outcome.classification
+            classifications[raw.record_id] = classification_outcome.classification
             fp = self._classification_fingerprint(candidate)
             if state.current_stage(run_id, raw.record_id) is RunStage.NORMALIZED:
                 state.advance(run_id, raw.record_id, RunStage.CLASSIFIED, fp)
             audits[raw.record_id]["university_stem"] = True
             audits[raw.record_id]["problem"] = True
-            audits[raw.record_id]["subject"] = outcome.classification.discipline.value
+            audits[raw.record_id]["subject"] = (
+                classification_outcome.classification.discipline.value
+            )
             self._save_audit(run_dir, raw.record_id, audits[raw.record_id])
 
         self._interrupt_if_requested(run_id, interrupt_after, RunStage.CLASSIFIED)
@@ -556,13 +574,13 @@ class PipelineRunner:
             ):
                 continue
             candidate = normalized[raw.record_id]
-            outcome = self._stage_answer(run_dir, raw.record_id, candidate)
-            evidence[raw.record_id].extend(outcome.evidence)
-            if outcome.reject_reason is not None or outcome.answer is None:
-                reason = outcome.reject_reason or "ANSWER_NOT_EXTRACTABLE"
+            answer_outcome = self._stage_answer(run_dir, raw.record_id, candidate)
+            evidence[raw.record_id].extend(answer_outcome.evidence)
+            if answer_outcome.reject_reason is not None or answer_outcome.answer is None:
+                reason = answer_outcome.reject_reason or "ANSWER_NOT_EXTRACTABLE"
                 self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)
                 continue
-            answers[raw.record_id] = outcome.answer
+            answers[raw.record_id] = answer_outcome.answer
             fp = _hash_json(
                 {
                     "content": _candidate_hash(candidate),
@@ -584,13 +602,13 @@ class PipelineRunner:
             ):
                 continue
             candidate = normalized[raw.record_id]
-            outcome = self._stage_analysis(run_dir, raw.record_id, candidate)
-            evidence[raw.record_id].extend(outcome.evidence)
-            if outcome.reject_reason is not None or outcome.analysis is None:
-                reason = outcome.reject_reason or "ANALYSIS_UNCERTAIN"
+            analysis_outcome = self._stage_analysis(run_dir, raw.record_id, candidate)
+            evidence[raw.record_id].extend(analysis_outcome.evidence)
+            if analysis_outcome.reject_reason is not None or analysis_outcome.analysis is None:
+                reason = analysis_outcome.reject_reason or "ANALYSIS_UNCERTAIN"
                 self._mark_rejected(state, run_id, run_dir, raw.record_id, reason, rejected, audits)
                 continue
-            analyses[raw.record_id] = outcome.analysis
+            analyses[raw.record_id] = analysis_outcome.analysis
             fp = self._analysis_fingerprint(candidate)
             if state.current_stage(run_id, raw.record_id) is RunStage.ANSWER_VALIDATED:
                 state.advance(run_id, raw.record_id, RunStage.ANALYSIS_VALIDATED, fp)
@@ -641,17 +659,17 @@ class PipelineRunner:
             if current not in {RunStage.EARLY_DEDUPED, RunStage.VERIFIED, RunStage.FINAL_DEDUPED}:
                 continue
             candidate = normalized[raw.record_id]
-            outcome = self._stage_verify(run_dir, raw.record_id, candidate)
-            evidence[raw.record_id].extend(outcome.evidence)
-            audits[raw.record_id]["alignment_pass"] = outcome.alignment_pass
-            audits[raw.record_id]["correctness_pass"] = outcome.correctness_pass
-            if outcome.reject_reason is not None:
+            verification_outcome = self._stage_verify(run_dir, raw.record_id, candidate)
+            evidence[raw.record_id].extend(verification_outcome.evidence)
+            audits[raw.record_id]["alignment_pass"] = verification_outcome.alignment_pass
+            audits[raw.record_id]["correctness_pass"] = verification_outcome.correctness_pass
+            if verification_outcome.reject_reason is not None:
                 self._mark_rejected(
                     state,
                     run_id,
                     run_dir,
                     raw.record_id,
-                    outcome.reject_reason,
+                    verification_outcome.reject_reason,
                     rejected,
                     audits,
                 )
