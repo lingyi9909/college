@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
@@ -82,10 +83,13 @@ def _runner(config: PipelineConfig, workspace: Path) -> PipelineRunner:
 
 @app.command("run")
 def run_command(
-    input_path: Path = typer.Option(..., "--input", exists=True, dir_okay=False),
-    config_path: Path = typer.Option(Path("config/pilot.yaml"), "--config"),
-    workspace: Path = typer.Option(Path("artifacts/workspace"), "--workspace"),
-    output: Path = typer.Option(Path("artifacts/output"), "--output"),
+    input_path: Annotated[
+        Path,
+        typer.Option("--input", exists=True, dir_okay=False),
+    ],
+    config_path: Annotated[Path, typer.Option("--config")] = Path("config/pilot.yaml"),
+    workspace: Annotated[Path, typer.Option("--workspace")] = Path("artifacts/workspace"),
+    output: Annotated[Path, typer.Option("--output")] = Path("artifacts/output"),
 ) -> None:
     """Run a local RawSourceRecord JSONL snapshot through the complete pipeline."""
     config = PipelineConfig.load(config_path)
@@ -101,10 +105,10 @@ def run_command(
 
 @app.command("resume")
 def resume_command(
-    run_id: str = typer.Option(..., "--run-id"),
-    config_path: Path = typer.Option(Path("config/pilot.yaml"), "--config"),
-    workspace: Path = typer.Option(Path("artifacts/workspace"), "--workspace"),
-    output: Path = typer.Option(Path("artifacts/output"), "--output"),
+    run_id: Annotated[str, typer.Option("--run-id")],
+    config_path: Annotated[Path, typer.Option("--config")] = Path("config/pilot.yaml"),
+    workspace: Annotated[Path, typer.Option("--workspace")] = Path("artifacts/workspace"),
+    output: Annotated[Path, typer.Option("--output")] = Path("artifacts/output"),
 ) -> None:
     """Resume an interrupted run from its persisted stage state and artifacts."""
     config = PipelineConfig.load(config_path)
@@ -116,8 +120,8 @@ def resume_command(
 
 @app.command("report")
 def report_command(
-    run_id: str = typer.Option(..., "--run-id"),
-    workspace: Path = typer.Option(Path("artifacts/workspace"), "--workspace"),
+    run_id: Annotated[str, typer.Option("--run-id")],
+    workspace: Annotated[Path, typer.Option("--workspace")] = Path("artifacts/workspace"),
 ) -> None:
     """Print the deterministic JSON report for one run."""
     path = workspace / "runs" / run_id / "run_report.json"
