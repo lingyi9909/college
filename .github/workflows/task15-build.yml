@@ -1,0 +1,434 @@
+name: Task 15 Build
+on: push
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/task15-pilot-freeze
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Add Task 15 RED tests
+        shell: bash
+        run: |
+          mkdir -p tests/unit/pipeline
+          cat > tests/unit/pipeline/test_pilot.py <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          import pytest
+
+          from college_builder.domain.source import RawSourceRecord
+          from college_builder.pipeline.pilot import (
+              FIVE_K_QUOTAS,
+              FIVE_K_TOTAL,
+              FiveKPilotPlan,
+              PilotSampleManifest,
+              build_pilot_sample,
+              freeze_pipeline_config,
+          )
+
+
+          def _record(site: str, index: int) -> RawSourceRecord:
+              payload = {"site": site, "index": index}
+              digest = hashlib.sha256(
+                  json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+              ).hexdigest()
+              return RawSourceRecord(
+                  record_id=f"{site}-{index:05d}",
+                  source_type="dataset",
+                  source_dataset="stackmathqa",
+                  source_id=f"{site}:{index}",
+                  source_url=f"https://example.invalid/{site}/{index}",
+                  raw_question=f"Question {site} {index}",
+                  raw_answer="",
+                  raw_analysis=f"Answer analysis {site} {index}",
+                  raw_payload=payload,
+                  metadata={"source_site": site, "language": "en"},
+                  license_metadata={"declared": "CC-BY-SA-4.0"},
+                  raw_sha256=digest,
+              )
+
+
+          def _records() -> list[RawSourceRecord]:
+              sizes = {"math": 20, "physics": 10, "statistics": 10, "mathoverflow": 10}
+              return [
+                  _record(site, index)
+                  for site, size in sizes.items()
+                  for index in range(size)
+              ]
+
+
+          def test_five_k_plan_is_exact_and_frozen() -> None:
+              assert FIVE_K_TOTAL == 5000
+              assert FIVE_K_QUOTAS == {
+                  "math": 2000,
+                  "physics": 1000,
+                  "statistics": 1000,
+                  "mathoverflow": 1000,
+              }
+              plan = FiveKPilotPlan(seed=20260910)
+              assert plan.total == 5000
+              assert plan.quotas == FIVE_K_QUOTAS
+
+
+          def test_build_pilot_sample_is_deterministic_and_records_seed() -> None:
+              records = _records()
+              plan = FiveKPilotPlan(
+                  seed=42,
+                  quotas={"math": 4, "physics": 2, "statistics": 2, "mathoverflow": 2},
+              )
+              revision = "git:" + "a" * 40
+              first = build_pilot_sample(records, plan=plan, source_revisions={"stackmathqa": revision})
+              second = build_pilot_sample(
+                  reversed(records), plan=plan, source_revisions={"stackmathqa": revision}
+              )
+
+              assert [row.record_id for row in first.records] == [row.record_id for row in second.records]
+              assert first.manifest == second.manifest
+              assert first.manifest.seed == 42
+              assert first.manifest.total == 10
+              assert Counter(str(row.metadata["source_site"]) for row in first.records) == plan.quotas
+              assert len(first.manifest.sample_sha256) == 64
+              assert first.manifest.source_revisions == {"stackmathqa": revision}
+
+
+          def test_pilot_manifest_rejects_non_immutable_source_revision() -> None:
+              with pytest.raises(ValueError, match="immutable"):
+                  PilotSampleManifest(
+                      seed=1,
+                      quotas={"math": 1},
+                      total=1,
+                      sample_sha256="a" * 64,
+                      sampled_record_ids=("math-00001",),
+                      source_revisions={"stackmathqa": "main"},
+                  )
+
+
+          def test_freeze_pipeline_config_is_byte_stable_and_changes_version(tmp_path: Path) -> None:
+              source = Path("config/pilot.yaml")
+              target = tmp_path / "frozen.yaml"
+              first_hash = freeze_pipeline_config(
+                  source, target, frozen_config_version="pilot-5k-frozen-v1"
+              )
+              first_bytes = target.read_bytes()
+              second_hash = freeze_pipeline_config(
+                  source, target, frozen_config_version="pilot-5k-frozen-v1"
+              )
+
+              assert target.read_bytes() == first_bytes
+              assert first_hash == second_hash == hashlib.sha256(first_bytes).hexdigest()
+              assert b"config_version: pilot-5k-frozen-v1" in first_bytes
+          PY
+
+          cat > tests/e2e/test_pilot_5k.py <<'PY'
+          from __future__ import annotations
+
+          import json
+          from pathlib import Path
+
+          from typer.testing import CliRunner
+
+          from college_builder.cli import app
+          from college_builder.config import PipelineConfig
+          from college_builder.pipeline.pilot import FIVE_K_QUOTAS, FiveKPilotPlan
+
+
+          def test_frozen_config_loads_and_preserves_precision_thresholds() -> None:
+              config = PipelineConfig.load(Path("config/pilot-5k-frozen.yaml"))
+              assert config.config_version == "pilot-5k-frozen-v1"
+              assert config.thresholds.university == 0.98
+              assert config.thresholds.problem == 0.98
+              assert config.thresholds.answer_extract == 0.995
+              assert config.thresholds.analysis == 0.98
+              assert config.thresholds.qa_alignment == 0.995
+              assert config.prompt_versions.model_dump() == {
+                  "university_classify": "v1",
+                  "problem_classify": "v1",
+                  "analysis_classify": "v1",
+                  "qa_alignment": "v1",
+                  "correctness_verify": "v1",
+              }
+
+
+          def test_pilot_plan_command_emits_exact_5k_strata_and_seed() -> None:
+              result = CliRunner().invoke(app, ["pilot", "plan", "--seed", "20260910"])
+              assert result.exit_code == 0, result.stdout
+              payload = json.loads(result.stdout)
+              assert payload["seed"] == 20260910
+              assert payload["total"] == 5000
+              assert payload["quotas"] == FIVE_K_QUOTAS
+              assert FiveKPilotPlan.model_validate(
+                  {"seed": payload["seed"], "quotas": payload["quotas"]}
+              ).total == 5000
+
+
+          def test_task15_report_and_summary_are_non_raw_and_self_consistent() -> None:
+              report = Path("docs/validation/5k-dry-run-report.md").read_text(encoding="utf-8")
+              summary = json.loads(Path("artifacts/5k/run_report.json").read_text(encoding="utf-8"))
+              assert "raw copyrighted dataset rows" not in summary
+              assert summary["pilot_size"] == 5000
+              assert summary["sampling"]["quotas"] == FIVE_K_QUOTAS
+              assert isinstance(summary["sampling"]["seed"], int)
+              assert len(summary["config_sha256"]) == 64
+              assert summary["config_version"] == "pilot-5k-frozen-v1"
+              assert summary["status"] in {"EXECUTED", "BLOCKED_EXTERNAL_PROVIDER"}
+              assert summary["status"] in report
+              assert summary["source_revision"] in report
+              assert summary["config_sha256"] in report
+          PY
+          git add tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_5k.py
+          git config user.name lingyi9909
+          git config user.email zhanhui9909@gmail.com
+          git commit -m 'test: define Task 15 pilot freeze contracts'
+          git push origin HEAD:feature/task15-pilot-freeze
+      - name: Prove RED
+        shell: bash
+        run: |
+          set +e
+          pytest tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_5k.py -q 2>&1 | tee /tmp/red.log
+          status=${PIPESTATUS[0]}
+          set -e
+          test "$status" -ne 0
+          grep -E 'pipeline.pilot|pilot-5k-frozen|No module named' /tmp/red.log
+      - name: Implement Task 15 pilot contracts
+        shell: bash
+        run: |
+          mkdir -p src/college_builder/pipeline docs/validation artifacts/5k
+          cat > src/college_builder/pipeline/pilot.py <<'PY'
+          """Deterministic Task 15 pilot sampling, evidence, and configuration freeze helpers."""
+
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import re
+          from collections.abc import Iterable, Mapping
+          from pathlib import Path
+          from typing import Annotated
+
+          import yaml  # type: ignore[import-untyped]
+          from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+          from college_builder.config import PipelineConfig
+          from college_builder.domain.source import RawSourceRecord
+          from college_builder.source.stackmathqa import stratified_sample
+
+          PositiveInt = Annotated[int, Field(ge=1)]
+          SHA256Hex = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+          FIVE_K_TOTAL = 5000
+          FIVE_K_QUOTAS: dict[str, int] = {
+              "math": 2000,
+              "physics": 1000,
+              "statistics": 1000,
+              "mathoverflow": 1000,
+          }
+          DEFAULT_FIVE_K_SEED = 20260910
+          _IMMUTABLE_REVISION = re.compile(
+              r"^(?:sha256:[0-9a-fA-F]{64}|git:(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64}))$"
+          )
+
+
+          class FiveKPilotPlan(BaseModel):
+              """Frozen deterministic sampling plan; defaults are the approved 5K strata."""
+
+              model_config = ConfigDict(frozen=True, extra="forbid")
+
+              seed: int = DEFAULT_FIVE_K_SEED
+              quotas: dict[str, PositiveInt] = Field(default_factory=lambda: dict(FIVE_K_QUOTAS))
+
+              @model_validator(mode="after")
+              def _validate_sites(self) -> "FiveKPilotPlan":
+                  if not set(self.quotas).issubset(FIVE_K_QUOTAS):
+                      raise ValueError("pilot quotas contain an unsupported StackMathQA stratum")
+                  return self
+
+              @property
+              def total(self) -> int:
+                  return sum(self.quotas.values())
+
+              def as_dict(self) -> dict[str, object]:
+                  return {"seed": self.seed, "quotas": dict(self.quotas), "total": self.total}
+
+
+          class PilotSampleManifest(BaseModel):
+              """Source-traceable sampling metadata committed without copyrighted raw rows."""
+
+              model_config = ConfigDict(frozen=True, extra="forbid")
+
+              seed: int
+              quotas: dict[str, PositiveInt]
+              total: PositiveInt
+              sample_sha256: SHA256Hex
+              sampled_record_ids: tuple[str, ...]
+              source_revisions: dict[str, str]
+
+              @model_validator(mode="after")
+              def _validate_manifest(self) -> "PilotSampleManifest":
+                  if self.total != sum(self.quotas.values()):
+                      raise ValueError("pilot manifest total does not equal quota sum")
+                  if self.total != len(self.sampled_record_ids):
+                      raise ValueError("pilot manifest total does not equal sampled record count")
+                  for revision in self.source_revisions.values():
+                      if not _IMMUTABLE_REVISION.fullmatch(revision):
+                          raise ValueError("pilot source revision must be explicitly immutable")
+                  return self
+
+
+          class PilotSample(BaseModel):
+              """Runtime-only sample plus a safe commit-ready manifest."""
+
+              model_config = ConfigDict(frozen=True, extra="forbid")
+
+              records: tuple[RawSourceRecord, ...]
+              manifest: PilotSampleManifest
+
+
+          def build_pilot_sample(
+              records: Iterable[RawSourceRecord],
+              *,
+              plan: FiveKPilotPlan,
+              source_revisions: Mapping[str, str],
+          ) -> PilotSample:
+              """Select deterministic exact strata and derive a stable non-content sample identity."""
+              sampled = tuple(stratified_sample(records, plan.quotas, plan.seed))
+              record_ids = tuple(record.record_id for record in sampled)
+              digest = hashlib.sha256(
+                  json.dumps(
+                      {"seed": plan.seed, "quotas": plan.quotas, "record_ids": record_ids},
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  ).encode()
+              ).hexdigest()
+              manifest = PilotSampleManifest(
+                  seed=plan.seed,
+                  quotas=plan.quotas,
+                  total=len(sampled),
+                  sample_sha256=digest,
+                  sampled_record_ids=record_ids,
+                  source_revisions=dict(source_revisions),
+              )
+              return PilotSample(records=sampled, manifest=manifest)
+
+
+          def freeze_pipeline_config(
+              source: Path,
+              target: Path,
+              *,
+              frozen_config_version: str,
+          ) -> str:
+              """Freeze only an already-valid pipeline config; thresholds/prompts/models are not altered."""
+              config = PipelineConfig.load(source)
+              payload = config.model_dump(mode="json")
+              payload["config_version"] = frozen_config_version
+              frozen = PipelineConfig.model_validate(payload)
+              text = yaml.safe_dump(frozen.model_dump(mode="json"), allow_unicode=True, sort_keys=False)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(text, encoding="utf-8")
+              return hashlib.sha256(target.read_bytes()).hexdigest()
+          PY
+
+          cp config/pilot.yaml config/pilot-5k-frozen.yaml
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('config/pilot-5k-frozen.yaml')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('config_version: pilot-v1', 'config_version: pilot-5k-frozen-v1', 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/college_builder/cli.py')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace(
+              'app = typer.Typer(no_args_is_help=True)\nconfig_app = typer.Typer(no_args_is_help=True)\napp.add_typer(config_app, name="config")',
+              'app = typer.Typer(no_args_is_help=True)\nconfig_app = typer.Typer(no_args_is_help=True)\npilot_app = typer.Typer(no_args_is_help=True)\napp.add_typer(config_app, name="config")\napp.add_typer(pilot_app, name="pilot")',
+              1,
+          )
+          insertion = '''\n\n@pilot_app.command("plan")\ndef pilot_plan_command(\n    seed: Annotated[int, typer.Option("--seed")] = 20260910,\n) -> None:\n    """Print the approved deterministic Task 15 5K sampling plan."""\n    from college_builder.pipeline.pilot import FiveKPilotPlan\n\n    plan = FiveKPilotPlan(seed=seed)\n    typer.echo(\n        json.dumps(\n            plan.as_dict(),\n            ensure_ascii=False,\n            sort_keys=True,\n            separators=(",", ":"),\n        )\n    )\n'''
+          marker = '\n\n@app.command("run")\n'
+          if insertion not in s:
+              s = s.replace(marker, insertion + marker, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+
+          CONFIG_SHA=$(sha256sum config/pilot-5k-frozen.yaml | awk '{print $1}')
+          SOURCE_REVISION='git:13239ec8c8078bc8dfb43e1383069eb9be000ff7'
+          cat > artifacts/5k/run_report.json <<EOF
+          {
+            "status": "BLOCKED_EXTERNAL_PROVIDER",
+            "pilot_size": 5000,
+            "sampling": {
+              "seed": 20260910,
+              "quotas": {
+                "math": 2000,
+                "physics": 1000,
+                "statistics": 1000,
+                "mathoverflow": 1000
+              }
+            },
+            "source_dataset": "math-ai/StackMathQA",
+            "source_revision": "$SOURCE_REVISION",
+            "config_version": "pilot-5k-frozen-v1",
+            "config_sha256": "$CONFIG_SHA",
+            "prompt_versions": {
+              "university_classify": "v1",
+              "problem_classify": "v1",
+              "analysis_classify": "v1",
+              "qa_alignment": "v1",
+              "correctness_verify": "v1"
+            },
+            "providers": {
+              "classifier": "openai_compatible/pilot-classifier-v1",
+              "verifier": "openai_compatible/pilot-verifier-v1"
+            },
+            "blocker": "OPENAI_COMPATIBLE_BASE_URL and provider credentials are not available to the repository CI environment; no model-backed 5K acceptance metrics are fabricated.",
+            "raw_rows_committed": false
+          }
+          EOF
+
+          cat > docs/validation/5k-dry-run-report.md <<EOF
+          # Task 15 — 5K Engineering Dry Run Report
+
+          Status: **BLOCKED_EXTERNAL_PROVIDER**
+
+          The approved deterministic sampling plan is frozen at seed **20260910** with exact strata: Math 2,000; Physics 1,000; Statistics 1,000; MathOverflow 1,000.
+
+          Source dataset: \`math-ai/StackMathQA\`  
+          Source revision authority: \`$SOURCE_REVISION\`  
+          Frozen config version: \`pilot-5k-frozen-v1\`  
+          Frozen config SHA-256: \`$CONFIG_SHA\`
+
+          The complete model-backed 5K pipeline cannot truthfully be executed in repository CI because \`OPENAI_COMPATIBLE_BASE_URL\` and matching provider credentials are not available there. No acceptance, reject-distribution, cost, latency, or quality numbers have been fabricated.
+
+          Gold/source regression remains part of the fresh repository test suite. The frozen config preserves the approved Pilot precision thresholds and prompt versions. The 50K Pilot must not begin until a real 5K run using this frozen configuration is attached and independently accepted.
+          EOF
+
+          ruff format src/college_builder/pipeline/pilot.py src/college_builder/cli.py tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_5k.py
+          ruff check --fix src/college_builder/pipeline/pilot.py src/college_builder/cli.py tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_5k.py
+          git diff --check
+      - name: Task 15 targeted
+        run: pytest tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_5k.py tests/unit/source/test_gold.py tests/unit/source/test_stackmathqa.py -q
+      - name: Full tests
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
+      - name: Commit verified Task 15 candidate
+        shell: bash
+        run: |
+          git add src/college_builder/pipeline/pilot.py src/college_builder/cli.py config/pilot-5k-frozen.yaml docs/validation/5k-dry-run-report.md artifacts/5k/run_report.json tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_5k.py
+          git commit -m 'test: certify Task 15 pilot configuration boundary'
+          git push origin HEAD:feature/task15-pilot-freeze
