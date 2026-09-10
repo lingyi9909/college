@@ -1,0 +1,25 @@
+name: Task 14 Review Exact Head
+on:
+  push:
+    branches:
+      - ci/task14-review-exact-head
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9fa8ae2bc120a77def29d76e4906233ed6855bd8
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - run: git rev-parse HEAD
+      - name: Targeted Task 14 E2E
+        run: pytest tests/e2e/test_pipeline_report.py tests/e2e/test_pipeline_resume.py -q
+      - name: Full tests
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
