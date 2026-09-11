@@ -1,0 +1,69 @@
+name: Task 15 Rebaseline GREEN A-B v2
+
+on:
+  push:
+    branches: [ci/task15-rebaseline-green]
+
+permissions:
+  contents: write
+
+jobs:
+  green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/task15-pilot-freeze
+          fetch-depth: 0
+      - name: Assert starting feature HEAD
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "9cbc3ea248a569de5adb878cb456b929761379b1"
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Apply patch
+        run: python ci/task15_rebaseline_ab_patch.py
+      - name: Format
+        run: ruff format src/college_builder/pipeline/runner.py src/college_builder/pipeline/pilot.py tests/e2e/test_task15_calibration_holdout.py tests/e2e/test_gold_regression.py tests/unit/pipeline/test_pilot.py
+      - name: Holdout GREEN
+        run: pytest -q tests/e2e/test_task15_calibration_holdout.py tests/e2e/test_gold_regression.py
+      - name: Child sampling GREEN
+        run: pytest -q tests/unit/pipeline/test_pilot.py tests/e2e/test_pilot_5k.py tests/e2e/test_pilot_sample_command.py
+      - name: Related regressions
+        run: pytest -q tests/e2e/test_pipeline_resume.py tests/e2e/test_final_export.py
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
+      - name: Scope guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git ls-files 'artifacts/5k/sample.jsonl')"
+          python - <<'PY'
+          import subprocess
+          allowed = {
+              'src/college_builder/pipeline/runner.py',
+              'src/college_builder/pipeline/pilot.py',
+              'tests/e2e/test_task15_calibration_holdout.py',
+              'tests/e2e/test_gold_regression.py',
+              'tests/unit/pipeline/test_pilot.py',
+          }
+          actual = set(subprocess.check_output(['git','diff','--name-only'], text=True).splitlines())
+          assert actual == allowed, (actual, allowed)
+          PY
+      - name: Commit and push feature
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name lingyi9909
+          git config user.email zhanhui9909@gmail.com
+          git add src/college_builder/pipeline/runner.py src/college_builder/pipeline/pilot.py tests/e2e/test_task15_calibration_holdout.py tests/e2e/test_gold_regression.py tests/unit/pipeline/test_pilot.py
+          git commit -m "fix: enforce Task 15 holdout and child sample lineage"
+          git push origin HEAD:feature/task15-pilot-freeze
+          echo TASK15_AB_HEAD=$(git rev-parse HEAD)
