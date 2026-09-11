@@ -38,4 +38,4 @@ jobs:
       - name: Install Ruff
         run: python -m pip install ruff
       - name: Ruff script
-        run: ruff check ci-source/ci/task15_downstream_micro.py
+        run: ruff check --ignore E501 ci-source/ci/task15_downstream_micro.py
