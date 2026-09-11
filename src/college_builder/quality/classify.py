@@ -159,7 +159,10 @@ class _DualProviderClassificationGate:
             )
 
         score = min(primary.score, verifier.score)
-        if primary.label != verifier.label:
+        labels_conflict = primary.label != verifier.label and not (
+            primary.label in self.positive_labels and verifier.label in self.positive_labels
+        )
+        if labels_conflict:
             return self._result(
                 context,
                 verdict=GateVerdict.REJECT,
