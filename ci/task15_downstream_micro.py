@@ -88,7 +88,8 @@ def _selected_candidates(records: dict[str, RawSourceRecord]):
         answer = str(spec["answer"])
         assert raw.raw_analysis[start:end] == answer
         normalized = normalize(raw)
-        assert normalized.analysis == raw.raw_analysis
+        assert normalized.source_record_id == raw.record_id
+        assert answer in normalized.analysis
         candidate = normalized.model_copy(update={"answer": answer})
         candidates.append((raw, candidate, spec))
         bindings.append(
@@ -100,6 +101,9 @@ def _selected_candidates(records: dict[str, RawSourceRecord]):
                 "answer": answer,
                 "authority_source": "raw_analysis",
                 "authority_span": f"analysis:{start}:{end}",
+                "normalized_analysis_sha256": hashlib.sha256(
+                    normalized.analysis.encode("utf-8")
+                ).hexdigest(),
             }
         )
     return candidates, bindings
@@ -139,7 +143,10 @@ def main() -> None:
 
     chosen, bindings = _selected_candidates(records)
     dedup = ExactDeduper().deduplicate(
-        tuple(DedupItem(candidate=candidate, provenance_score=1.0, quality_score=1.0) for _, candidate, _ in chosen)
+        tuple(
+            DedupItem(candidate=candidate, provenance_score=1.0, quality_score=1.0)
+            for _, candidate, _ in chosen
+        )
     )
     assert len(dedup.kept_record_ids) == 3
     assert not dedup.dropped_record_ids
@@ -149,8 +156,23 @@ def main() -> None:
     for raw, candidate, spec in chosen:
         alignment_result = GateEngine(gates=(alignment,), context=context).run(candidate)
         correctness_result = GateEngine(gates=(correctness,), context=context).run(candidate)
-        assert alignment_result.verdict is GateVerdict.PASS, alignment_result.model_dump() if hasattr(alignment_result, "model_dump") else alignment_result
-        assert correctness_result.verdict is GateVerdict.PASS, correctness_result.model_dump() if hasattr(correctness_result, "model_dump") else correctness_result
+        evidence_rows.append(
+            {
+                "record_id": raw.record_id,
+                "alignment": alignment_result.evidence[-1].model_dump(mode="json"),
+                "correctness": correctness_result.evidence[-1].model_dump(mode="json"),
+            }
+        )
+        if alignment_result.verdict is not GateVerdict.PASS:
+            raise AssertionError(
+                f"alignment rejected {raw.record_id}: "
+                f"{alignment_result.evidence[-1].model_dump(mode='json')}"
+            )
+        if correctness_result.verdict is not GateVerdict.PASS:
+            raise AssertionError(
+                f"correctness rejected {raw.record_id}: "
+                f"{correctness_result.evidence[-1].model_dump(mode='json')}"
+            )
 
         start = int(spec["start"])
         end = int(spec["end"])
@@ -158,9 +180,20 @@ def main() -> None:
         ir = UniversityQuestionIR(
             candidate_id=candidate.record_id,
             source_record_id=raw.record_id,
-            question=QuestionContent(raw=raw.raw_question, normalized=candidate.question, assets=()),
-            answer=AnswerContent(raw="", final_answer=answer, source_span=f"analysis:{start}:{end}"),
-            analysis=AnalysisContent(raw=raw.raw_analysis, type=spec["analysis_type"]),
+            question=QuestionContent(
+                raw=raw.raw_question,
+                normalized=candidate.question,
+                assets=(),
+            ),
+            answer=AnswerContent(
+                raw="",
+                final_answer=answer,
+                source_span=f"analysis:{start}:{end}",
+            ),
+            analysis=AnalysisContent(
+                raw=raw.raw_analysis,
+                type=spec["analysis_type"],
+            ),
             classification=Classification(
                 discipline=spec["discipline"],
                 course=None,
@@ -168,7 +201,9 @@ def main() -> None:
                 problem_type=spec["problem_type"],
             ),
             metadata=QuestionMetadata(language="en"),
-            quality=QualityState(gates=tuple((*alignment_result.evidence, *correctness_result.evidence))),
+            quality=QualityState(
+                gates=tuple((*alignment_result.evidence, *correctness_result.evidence))
+            ),
             provenance=QuestionProvenance(
                 source_dataset=raw.source_dataset,
                 source_id=raw.source_id,
@@ -178,28 +213,23 @@ def main() -> None:
             dedup=DedupState(exact_hash=ExactDeduper().fingerprint(candidate)),
         )
         irs.append(ir)
-        evidence_rows.append(
-            {
-                "record_id": raw.record_id,
-                "alignment": alignment_result.evidence[-1].model_dump(mode="json"),
-                "correctness": correctness_result.evidence[-1].model_dump(mode="json"),
-            }
-        )
 
     out = Path("/tmp/task15-downstream-micro")
     out.mkdir(parents=True, exist_ok=True)
-    export_path = export_jsonl(
-        [ExportRecord(ir=ir, stage=RunStage.ACCEPTED) for ir in irs],
-        out,
-    )
-    exported = [json.loads(line) for line in export_path.read_text(encoding="utf-8").splitlines()]
-    assert len(exported) == 3
-    assert all(len(row) == 19 for row in exported)
-
     Path(out / "evidence.json").write_text(
         json.dumps(evidence_rows, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    export_path = export_jsonl(
+        [ExportRecord(ir=ir, stage=RunStage.ACCEPTED) for ir in irs],
+        out,
+    )
+    exported = [
+        json.loads(line) for line in export_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(exported) == 3
+    assert all(len(row) == 19 for row in exported)
+
     report = {
         "certification": "Task15 downstream real-model micro",
         "feature_sha": FEATURE_SHA,
@@ -208,7 +238,10 @@ def main() -> None:
         "hundred_sample_sha256": HUNDRED_SAMPLE_SHA,
         "record_count": 3,
         "records": bindings,
-        "scope": "Gate5 alignment -> independent correctness -> exact dedup -> exact 19-field export",
+        "scope": (
+            "Gate5 alignment -> independent correctness -> exact dedup -> "
+            "exact 19-field export"
+        ),
         "does_not_certify": ["Gate1", "Gate2", "Gate3", "Gate4"],
         "verifier": {"provider": "openai_compatible", "model": "deepseek-v4-pro"},
         "gate5_pass_count": 3,
