@@ -22,12 +22,30 @@ class PassProvider:
         answer = str(request.inputs.get("answer", ""))
         analysis = str(request.inputs.get("analysis", ""))
         if request.task == "gate_1_university_stem":
-            return ModelDecision(label="UNIVERSITY_STEM", score=0.999, evidence_references=("question:0-1",), reason_code="PASS")
+            return ModelDecision(
+                label="UNIVERSITY_STEM",
+                score=0.999,
+                evidence_references=("question:0-1",),
+                reason_code="PASS",
+            )
         if request.task == "gate_2_problem":
-            return ModelDecision(label="CALCULATION", score=0.999, evidence_references=("question:0-1",), reason_code="PASS")
+            return ModelDecision(
+                label="CALCULATION",
+                score=0.999,
+                evidence_references=("question:0-1",),
+                reason_code="PASS",
+            )
         if request.task == "gate_4_original_analysis":
-            return ModelDecision(label="STEP_BY_STEP", score=0.999, evidence_references=(f"analysis:0-{len(analysis)}",), reason_code="PASS")
-        if request.task in {"gate_5_qa_alignment", "independent_correctness_verification"}:
+            return ModelDecision(
+                label="STEP_BY_STEP",
+                score=0.999,
+                evidence_references=(f"analysis:0-{len(analysis)}",),
+                reason_code="PASS",
+            )
+        if request.task in {
+            "gate_5_qa_alignment",
+            "independent_correctness_verification",
+        }:
             return ModelDecision(
                 label="PASS",
                 score=0.999,
@@ -72,6 +90,7 @@ def test_calibration_gold_passes_quality_but_is_not_training_exported(tmp_path: 
             "answer": "answer",
             "solution": "solution",
         },
+        "license_metadata": {"declared": "CC-BY-4.0"},
     }
     primary = PassProvider("primary")
     verifier = PassProvider("verifier")
