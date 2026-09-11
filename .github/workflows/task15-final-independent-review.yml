@@ -1,0 +1,78 @@
+name: Task 15 Final Independent Review
+
+on:
+  push:
+    branches: [verification/task15-final-independent-review]
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 5572fe691a866d048309806a8db051244a2d46d3
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Exact HEAD and evidence-only lineage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "5572fe691a866d048309806a8db051244a2d46d3"
+          python - <<'PY'
+          import subprocess
+          expected={
+            'artifacts/100/run_report.json',
+            'artifacts/100/sample_manifest.json',
+            'artifacts/5k/sampling_certification.json',
+            'docs/validation/100-dry-run-audit.md',
+            'docs/validation/task15-downstream-micro-evidence.md',
+          }
+          changed=set(subprocess.check_output(['git','diff','--name-only','d3b35964ac92d799405fd88101fa11fd05ff1460..HEAD'],text=True).splitlines())
+          assert changed == expected, (changed, expected)
+          print('TASK15_EVIDENCE_ONLY_LINEAGE=PASS')
+          PY
+      - name: Acceptance evidence contract
+        run: |
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          report=json.loads(Path('artifacts/100/run_report.json').read_text())
+          sample=json.loads(Path('artifacts/100/sample_manifest.json').read_text())
+          five=json.loads(Path('artifacts/5k/sampling_certification.json').read_text())
+          audit=Path('docs/validation/100-dry-run-audit.md').read_text()
+          micro=Path('docs/validation/task15-downstream-micro-evidence.md').read_text()
+          assert report['exact_code_sha']=='d3b35964ac92d799405fd88101fa11fd05ff1460'
+          assert report['raw_count']==100 and report['accepted_count']==0 and report['rejected_count']==100
+          assert report['provider_errors']==0
+          assert report['five_k_sample_sha256']==five['sample_sha256']==sample['parent_sample_sha256']
+          assert report['hundred_sample_sha256']==sample['sample_sha256']
+          assert sample['total']==100 and len(sample['sampled_record_ids'])==100 and len(sample['sampled_raw_sha256'])==100
+          assert five['total']==5000 and five['model_calls']==0 and five['deterministic_reproduction'] is True
+          assert '**57/100 REJECT_CONFIRMED**' in audit
+          assert '**43/100 FALSE_REJECT**' in audit
+          assert 'False accepts: **0**' in audit
+          rows=re.findall(r'^\|\s*(\d+)\s*\|', audit, flags=re.M)
+          nums=[int(x) for x in rows if x.isdigit()]
+          assert nums==list(range(1,101)), nums
+          assert '34589616128' in micro and '34590949726' in micro
+          assert 'evidence-offset' in micro.lower() or 'character-offset' in micro.lower()
+          assert 'false accepts observed: **0**' in micro.lower()
+          assert 'outside this Task 15 certification evidence' in micro
+          print('TASK15_ACCEPTANCE_EVIDENCE=PASS')
+          PY
+      - name: Focused Task 15 suite
+        run: pytest tests/e2e/test_pilot_5k.py tests/e2e/test_pilot_sample_command.py tests/e2e/test_gold_regression.py tests/e2e/test_task15_calibration_holdout.py tests/e2e/test_task15_pipeline_concurrency.py tests/e2e/test_task15_provider_prompt_protocol.py tests/unit/pipeline/test_pilot.py tests/unit/providers/test_openai_compatible_resilience.py tests/unit/test_provider_config_resilience.py -q
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
