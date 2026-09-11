@@ -27,6 +27,13 @@ FIVE_K_QUOTAS: dict[str, int] = {
     "mathoverflow": 1000,
 }
 DEFAULT_FIVE_K_SEED = 20260910
+CERTIFICATION_TOTAL = 100
+CERTIFICATION_QUOTAS: dict[str, int] = {
+    "math": 40,
+    "physics": 20,
+    "statistics": 20,
+    "mathoverflow": 20,
+}
 _IMMUTABLE_REVISION = re.compile(
     r"^(?:sha256:[0-9a-fA-F]{64}|git:(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64}))$"
 )
@@ -91,6 +98,108 @@ class PilotSample(BaseModel):
 
     records: tuple[RawSourceRecord, ...]
     manifest: PilotSampleManifest
+
+
+class CertificationSamplePlan(BaseModel):
+    """Deterministic real-model certification child sample plan."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    seed: int = DEFAULT_FIVE_K_SEED
+    quotas: dict[str, PositiveInt] = Field(default_factory=lambda: dict(CERTIFICATION_QUOTAS))
+
+    @model_validator(mode="after")
+    def _validate_sites(self) -> CertificationSamplePlan:
+        if not self.quotas:
+            raise ValueError("certification quotas must not be empty")
+        if not set(self.quotas).issubset(CERTIFICATION_QUOTAS):
+            raise ValueError("certification quotas contain an unsupported StackMathQA stratum")
+        return self
+
+    @property
+    def total(self) -> int:
+        return sum(self.quotas.values())
+
+
+class CertificationSampleManifest(BaseModel):
+    """Safe lineage manifest for the deterministic 100-of-5K sample."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    parent_sample_sha256: SHA256Hex
+    seed: int
+    quotas: dict[str, PositiveInt]
+    total: PositiveInt
+    sample_sha256: SHA256Hex
+    sampled_record_ids: tuple[str, ...]
+    sampled_raw_sha256: tuple[SHA256Hex, ...]
+
+    @model_validator(mode="after")
+    def _validate_manifest(self) -> CertificationSampleManifest:
+        if self.total != sum(self.quotas.values()):
+            raise ValueError("certification manifest total does not equal quota sum")
+        if self.total != len(self.sampled_record_ids):
+            raise ValueError("certification manifest total does not equal sampled record count")
+        if self.total != len(self.sampled_raw_sha256):
+            raise ValueError("certification manifest total does not equal sampled hash count")
+        return self
+
+
+class CertificationSample(BaseModel):
+    """Runtime child records plus a commit-safe lineage manifest."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    records: tuple[RawSourceRecord, ...]
+    manifest: CertificationSampleManifest
+
+
+def build_certification_sample(
+    parent: PilotSample,
+    *,
+    plan: CertificationSamplePlan,
+) -> CertificationSample:
+    """Select a deterministic stratified child sample strictly from a certified parent."""
+    parent_ids = parent.manifest.sampled_record_ids
+    parent_hashes = parent.manifest.sampled_raw_sha256
+    if len(parent.records) != parent.manifest.total:
+        raise ValueError("parent pilot sample record count does not match manifest")
+    parent_identity = dict(zip(parent_ids, parent_hashes, strict=True))
+    if len(parent_identity) != parent.manifest.total:
+        raise ValueError("parent pilot manifest contains duplicate record_id values")
+    for record in parent.records:
+        if parent_identity.get(record.record_id) != record.raw_sha256:
+            raise ValueError("parent pilot record identity does not match manifest")
+
+    sampled = _bounded_child_priority_sample(
+        parent.records,
+        plan=plan,
+        parent_sample_sha256=parent.manifest.sample_sha256,
+    )
+    record_ids = tuple(record.record_id for record in sampled)
+    raw_hashes = tuple(record.raw_sha256 for record in sampled)
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "parent_sample_sha256": parent.manifest.sample_sha256,
+                "seed": plan.seed,
+                "quotas": plan.quotas,
+                "records": list(zip(record_ids, raw_hashes, strict=True)),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    manifest = CertificationSampleManifest(
+        parent_sample_sha256=parent.manifest.sample_sha256,
+        seed=plan.seed,
+        quotas=plan.quotas,
+        total=len(sampled),
+        sample_sha256=digest,
+        sampled_record_ids=record_ids,
+        sampled_raw_sha256=raw_hashes,
+    )
+    return CertificationSample(records=sampled, manifest=manifest)
 
 
 def build_pilot_sample(
@@ -210,6 +319,56 @@ def freeze_pipeline_config(
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
     return hashlib.sha256(target.read_bytes()).hexdigest()
+
+
+def _bounded_child_priority_sample(
+    records: Iterable[RawSourceRecord],
+    *,
+    plan: CertificationSamplePlan,
+    parent_sample_sha256: str,
+) -> tuple[RawSourceRecord, ...]:
+    heaps: dict[str, list[tuple[int, str, str, RawSourceRecord]]] = {
+        site: [] for site in plan.quotas
+    }
+    counts = {site: 0 for site in plan.quotas}
+    seen_ids: set[str] = set()
+    for record in records:
+        site = record.metadata.get("source_site")
+        if not isinstance(site, str) or site not in plan.quotas:
+            continue
+        if record.record_id in seen_ids:
+            raise ValueError(f"duplicate certification source record_id: {record.record_id}")
+        seen_ids.add(record.record_id)
+        counts[site] += 1
+        priority = int(
+            hashlib.sha256(
+                f"{parent_sample_sha256}\0{plan.seed}\0{site}\0{record.record_id}".encode()
+            ).hexdigest(),
+            16,
+        )
+        entry = (-priority, record.record_id, record.raw_sha256, record)
+        heap = heaps[site]
+        quota = plan.quotas[site]
+        if len(heap) < quota:
+            heapq.heappush(heap, entry)
+        elif entry > heap[0]:
+            heapq.heapreplace(heap, entry)
+
+    for site, quota in plan.quotas.items():
+        if counts[site] < quota:
+            raise ValueError(
+                f"insufficient parent records for {site}: required {quota}, found {counts[site]}"
+            )
+
+    selected: list[RawSourceRecord] = []
+    for site in plan.quotas:
+        candidates = (
+            (-priority, record_id, raw_hash, record)
+            for priority, record_id, raw_hash, record in heaps[site]
+        )
+        ordered = sorted(candidates, key=lambda item: (item[0], item[1], item[2]))
+        selected.extend(item[3] for item in ordered)
+    return tuple(selected)
 
 
 def _bounded_priority_sample(

@@ -9,10 +9,14 @@ import pytest
 
 from college_builder.domain.source import RawSourceRecord
 from college_builder.pipeline.pilot import (
+    CERTIFICATION_QUOTAS,
+    CERTIFICATION_TOTAL,
     FIVE_K_QUOTAS,
     FIVE_K_TOTAL,
+    CertificationSamplePlan,
     FiveKPilotPlan,
     PilotSampleManifest,
+    build_certification_sample,
     build_pilot_sample,
     freeze_pipeline_config,
 )
@@ -121,3 +125,89 @@ def test_sample_identity_changes_when_same_record_id_content_hash_changes() -> N
     assert first.manifest.sampled_record_ids == second.manifest.sampled_record_ids
     assert first.manifest.sample_sha256 != second.manifest.sample_sha256
     assert first.manifest.sampled_raw_sha256 != second.manifest.sampled_raw_sha256
+
+
+def test_certification_plan_defaults_to_exact_100_strata() -> None:
+    plan = CertificationSamplePlan()
+    assert CERTIFICATION_TOTAL == 100
+    assert CERTIFICATION_QUOTAS == {"math": 40, "physics": 20, "statistics": 20, "mathoverflow": 20}
+    assert plan.total == 100
+    assert plan.quotas == CERTIFICATION_QUOTAS
+
+
+def test_certification_sample_is_deterministic_child_of_parent_sample() -> None:
+    records = _records()
+    revision = "git:" + "c" * 40
+    parent = build_pilot_sample(
+        records,
+        plan=FiveKPilotPlan(
+            seed=20260910, quotas={"math": 20, "physics": 10, "statistics": 10, "mathoverflow": 10}
+        ),
+        source_revisions={"stackmathqa": revision},
+    )
+    plan = CertificationSamplePlan(
+        seed=20260910, quotas={"math": 4, "physics": 2, "statistics": 2, "mathoverflow": 2}
+    )
+    first = build_certification_sample(parent, plan=plan)
+    second = build_certification_sample(parent, plan=plan)
+    assert first.manifest == second.manifest
+    assert first.manifest.parent_sample_sha256 == parent.manifest.sample_sha256
+    assert Counter(str(row.metadata["source_site"]) for row in first.records) == plan.quotas
+    parent_pairs = dict(
+        zip(parent.manifest.sampled_record_ids, parent.manifest.sampled_raw_sha256, strict=True)
+    )
+    for record_id, raw_sha in zip(
+        first.manifest.sampled_record_ids, first.manifest.sampled_raw_sha256, strict=True
+    ):
+        assert parent_pairs[record_id] == raw_sha
+
+
+def test_certification_sample_identity_binds_parent_sample() -> None:
+    records = _records()
+    revision = "git:" + "d" * 40
+    parent = build_pilot_sample(
+        records,
+        plan=FiveKPilotPlan(
+            seed=1, quotas={"math": 4, "physics": 2, "statistics": 2, "mathoverflow": 2}
+        ),
+        source_revisions={"stackmathqa": revision},
+    )
+    plan = CertificationSamplePlan(
+        seed=9, quotas={"math": 1, "physics": 1, "statistics": 1, "mathoverflow": 1}
+    )
+    first = build_certification_sample(parent, plan=plan)
+    rebound_parent = parent.model_copy(
+        update={"manifest": parent.manifest.model_copy(update={"sample_sha256": "f" * 64})}
+    )
+    second = build_certification_sample(rebound_parent, plan=plan)
+    assert first.manifest.sample_sha256 != second.manifest.sample_sha256
+
+
+def test_certification_sample_rejects_parent_record_hash_mismatch() -> None:
+    records = _records()
+    revision = "git:" + "e" * 40
+    parent = build_pilot_sample(
+        records,
+        plan=FiveKPilotPlan(
+            seed=1, quotas={"math": 4, "physics": 2, "statistics": 2, "mathoverflow": 2}
+        ),
+        source_revisions={"stackmathqa": revision},
+    )
+    bad = parent.records[0].model_copy(update={"raw_sha256": "f" * 64})
+    tampered = parent.model_copy(update={"records": (bad, *parent.records[1:])})
+    with pytest.raises(ValueError, match="identity"):
+        build_certification_sample(
+            tampered, plan=CertificationSamplePlan(seed=1, quotas={"math": 1})
+        )
+
+
+def test_certification_sample_fails_closed_on_insufficient_parent_stratum() -> None:
+    records = _records()
+    revision = "git:" + "f" * 40
+    parent = build_pilot_sample(
+        records,
+        plan=FiveKPilotPlan(seed=1, quotas={"math": 1}),
+        source_revisions={"stackmathqa": revision},
+    )
+    with pytest.raises(ValueError, match="insufficient parent records"):
+        build_certification_sample(parent, plan=CertificationSamplePlan(seed=1, quotas={"math": 2}))

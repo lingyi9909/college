@@ -960,14 +960,17 @@ class PipelineRunner:
             )
             if state.current_stage(run_id, raw.record_id) is RunStage.FINAL_DEDUPED:
                 state.advance(run_id, raw.record_id, RunStage.ACCEPTED, accepted_fp)
-            audits[raw.record_id]["accepted"] = True
+            training_eligible = not _is_calibration_holdout(raw)
+            audits[raw.record_id]["accepted"] = training_eligible
             self._save_audit(run_dir, raw.record_id, audits[raw.record_id])
             accepted_by_id[raw.record_id] = ir
 
         self._interrupt_if_requested(run_id, interrupt_after, RunStage.ACCEPTED)
 
         accepted_irs = [
-            accepted_by_id[raw.record_id] for raw in raw_records if raw.record_id in accepted_by_id
+            accepted_by_id[raw.record_id]
+            for raw in raw_records
+            if raw.record_id in accepted_by_id and not _is_calibration_holdout(raw)
         ]
         output_path = export_jsonl(
             (ExportRecord(ir=ir, stage=RunStage.ACCEPTED) for ir in accepted_irs),
@@ -1645,6 +1648,16 @@ def _raw_identity(raw: RawSourceRecord) -> dict[str, str]:
         "source_dataset": raw.source_dataset,
         "source_id": raw.source_id,
     }
+
+
+def _is_calibration_holdout(raw: RawSourceRecord) -> bool:
+    metadata = raw.model_dump(mode="json").get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    return (
+        metadata.get("calibration_holdout") is True
+        or metadata.get("gold_role") == "CALIBRATION_GOLD"
+    )
 
 
 def _subject_from_raw(raw: RawSourceRecord) -> str:

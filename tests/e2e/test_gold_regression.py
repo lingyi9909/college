@@ -137,7 +137,12 @@ def test_stemq_scibench_cfe_gold_records_survive_complete_pipeline(tmp_path: Pat
             source_config=source_config,
             output_dir=tmp_path / f"output-{dataset}",
         )
-        assert result.accepted_count == 1
-        exported = json.loads(result.output_path.read_text(encoding="utf-8"))
-        assert exported["text_answer"] == "x = 4"
-        assert "Therefore x = 4" in exported["answer_analysis"]
+        expected_count = 0 if role == "CALIBRATION_GOLD" else 1
+        assert result.accepted_count == expected_count
+        exported_text = result.output_path.read_text(encoding="utf-8").strip()
+        if role == "CALIBRATION_GOLD":
+            assert exported_text == ""
+        else:
+            exported = json.loads(exported_text)
+            assert exported["text_answer"] == "x = 4"
+            assert "Therefore x = 4" in exported["answer_analysis"]
