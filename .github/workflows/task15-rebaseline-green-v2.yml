@@ -36,9 +36,11 @@ jobs:
       - name: Apply patch
         working-directory: work
         run: python ../ci-source/ci/task15_rebaseline_ab_patch.py
-      - name: Format
+      - name: Format and lint-fix changed files
         working-directory: work
-        run: ruff format src/college_builder/pipeline/runner.py src/college_builder/pipeline/pilot.py tests/e2e/test_task15_calibration_holdout.py tests/e2e/test_gold_regression.py tests/unit/pipeline/test_pilot.py
+        run: |
+          ruff check --fix src/college_builder/pipeline/pilot.py
+          ruff format src/college_builder/pipeline/runner.py src/college_builder/pipeline/pilot.py tests/e2e/test_task15_calibration_holdout.py tests/e2e/test_gold_regression.py tests/unit/pipeline/test_pilot.py
       - name: Holdout GREEN
         working-directory: work
         run: pytest -q tests/e2e/test_task15_calibration_holdout.py tests/e2e/test_gold_regression.py
