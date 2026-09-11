@@ -1,0 +1,33 @@
+{
+  "certification_scope": "task15-5k-deterministic-sampling",
+  "deterministic_reproduction": true,
+  "exact_code_sha": "d3b35964ac92d799405fd88101fa11fd05ff1460",
+  "github_actions_artifact": {
+    "digest": "sha256:e4283b61d19f9a1a7d343e3dfe8c2a1ff33fd59600814c58b89ceda1f83fcfe8",
+    "id": 10183392577,
+    "name": "task15-zero-model-certification"
+  },
+  "github_actions_run_id": 34557752051,
+  "model_calls": 0,
+  "notes": "Two independent bounded-memory sampling passes over the pinned source revision produced identical sample identity. No model provider was configured or called.",
+  "sample_sha256": "e9d7b957a092114da35dbb839319a08ab555692a8a06863faf2b1980c2a681c5",
+  "sampled_raw_sha256_count": 5000,
+  "sampled_record_id_count": 5000,
+  "seed": 20260910,
+  "source_dataset": "math-ai/StackMathQA",
+  "source_file_sha256": {
+    "math.stackexchange.com.jsonl": "c8d4e4b7badc49d4cfe801a5b54b3161689d65ca9c2f0569c54b2db203f992d5",
+    "mathoverflow.net.jsonl": "b4f608c73b5908373263c1598e07713c20f3f8370c82a47f0614ae6826e41073",
+    "physics.stackexchange.com.jsonl": "267e85607d860663b812ea5e72807d5f4559d366bef523b54bba865836259d93",
+    "stats.stackexchange.com.jsonl": "105a6fc5b4da6de018b055a27f1eca82da91b77cc25eae5b780f2e5245462c56"
+  },
+  "source_revision": "git:13239ec8c8078bc8dfb43e1383069eb9be000ff7",
+  "status": "PASS",
+  "strata": {
+    "math": 2000,
+    "mathoverflow": 1000,
+    "physics": 1000,
+    "statistics": 1000
+  },
+  "total": 5000
+}
