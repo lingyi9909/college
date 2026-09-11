@@ -1,0 +1,30 @@
+name: Task16A1 Exact Head Verification
+
+on:
+  push:
+    branches:
+      - ci/task16a1-verification
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ec0b3a43043c93d0666af7b3b2100f1e48ae920e
+      - name: Exact feature head guard
+        run: test "$(git rev-parse HEAD)" = "ec0b3a43043c93d0666af7b3b2100f1e48ae920e"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Task16A1 regression
+        run: pytest tests/unit/quality/test_task16_gate2_conflict.py -q
+      - name: Existing classification and gold regression
+        run: pytest tests/unit/quality/test_classify.py tests/e2e/test_gold_regression.py -q
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
