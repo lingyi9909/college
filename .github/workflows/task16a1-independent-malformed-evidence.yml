@@ -1,0 +1,75 @@
+name: Task16A1 Independent Malformed Evidence
+
+on:
+  push:
+    branches:
+      - verification/task16a1-malformed-evidence
+
+permissions:
+  contents: read
+
+jobs:
+  verify-malformed-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ec0b3a43043c93d0666af7b3b2100f1e48ae920e
+      - name: Exact candidate guard
+        run: test "$(git rev-parse HEAD)" = "ec0b3a43043c93d0666af7b3b2100f1e48ae920e"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Malformed evidence must fail closed
+        shell: bash
+        run: |
+          python - <<'PY'
+          from college_builder.domain.evidence import GateVerdict
+          from college_builder.domain.source import NormalizedQA
+          from college_builder.providers.base import ModelDecision
+          from college_builder.providers.fake import FakeStructuredModelProvider
+          from college_builder.quality.classify import ProblemGate
+          from college_builder.quality.engine import GateContext, GateEngine
+
+          candidate = NormalizedQA(
+              record_id='norm-review-malformed',
+              source_record_id='raw-review-malformed',
+              question='Prove the identity and derive the expression.',
+              answer='source answer',
+              analysis='source analysis',
+              subject_candidates=('mathematics',),
+              images=(),
+              metadata={},
+              normalization_evidence={},
+          )
+          primary = FakeStructuredModelProvider(
+              provider='fake', model='primary-v1',
+              decisions=(ModelDecision(
+                  label='PROOF', score=0.95,
+                  evidence_references=('question:not-a-span',),
+                  reason_code='REVIEW_MALFORMED',
+              ),),
+          )
+          verifier = FakeStructuredModelProvider(
+              provider='fake', model='verifier-v2',
+              decisions=(ModelDecision(
+                  label='DERIVATION', score=0.99,
+                  evidence_references=('question:garbage',),
+                  reason_code='REVIEW_MALFORMED',
+              ),),
+          )
+          gate = ProblemGate(
+              primary=primary,
+              verifier=verifier,
+              prompt='problem prompt',
+              prompt_version='v1',
+          )
+          evidence = GateEngine(
+              gates=(gate,),
+              context=GateContext(config_version='task16a1-independent-review'),
+          ).run(candidate).evidence[0]
+          print('verdict=', evidence.verdict.value, 'reason=', evidence.reason_code)
+          assert evidence.verdict is GateVerdict.REJECT, evidence
+          assert evidence.reason_code == 'PROBLEM_TYPE_UNCERTAIN', evidence
+          PY
