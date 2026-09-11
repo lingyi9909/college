@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import task15_downstream_micro as micro
+
 from college_builder.domain.question import AnalysisType, Discipline, ProblemType
 
 micro.SELECTED = {
