@@ -41,8 +41,8 @@ jobs:
       - name: Format changed files
         working-directory: work
         run: |
-          ruff check --fix src/college_builder/providers/openai_compatible.py src/college_builder/reporting/pilot_report.py src/college_builder/pipeline/runner.py tests/e2e/test_gold_regression.py tests/e2e/test_pipeline_report.py tests/unit/providers/test_openai_compatible_resilience.py
           ruff format src/college_builder/providers/openai_compatible.py src/college_builder/reporting/pilot_report.py src/college_builder/pipeline/runner.py tests/e2e/test_gold_regression.py tests/e2e/test_pipeline_report.py tests/unit/providers/test_openai_compatible_resilience.py
+          ruff check --fix src/college_builder/providers/openai_compatible.py src/college_builder/reporting/pilot_report.py src/college_builder/pipeline/runner.py tests/e2e/test_gold_regression.py tests/e2e/test_pipeline_report.py tests/unit/providers/test_openai_compatible_resilience.py
       - name: Gold regression GREEN
         working-directory: work
         run: pytest -q tests/e2e/test_gold_regression.py tests/e2e/test_task15_calibration_holdout.py
