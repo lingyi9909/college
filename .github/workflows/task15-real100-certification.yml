@@ -1,0 +1,91 @@
+name: Task 15 Real-100 Model Certification
+
+on:
+  push:
+    branches: [ci/task15-real100-rebaseline]
+
+permissions:
+  contents: read
+
+jobs:
+  certify100:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      OPENAI_COMPATIBLE_BASE_URL: ${{ secrets.TASK15_OPENAI_BASE_URL }}
+      OPENAI_COMPATIBLE_API_KEY: ${{ secrets.TASK15_OPENAI_API_KEY }}
+      TASK15_CODE_SHA: d3b35964ac92d799405fd88101fa11fd05ff1460
+      TASK15_EXPECTED_100_SHA: ae513933791c2ac27d3916a4149193c2477e00ce993c59b597b27ad02101ae8e
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ci-source
+      - uses: actions/checkout@v4
+        with:
+          ref: d3b35964ac92d799405fd88101fa11fd05ff1460
+          path: work
+      - name: Assert final production identity
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TASK15_CODE_SHA"
+          test -n "$OPENAI_COMPATIBLE_BASE_URL"
+          test -n "$OPENAI_COMPATIBLE_API_KEY"
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          assert hashlib.sha256(Path('config/pilot-5k-frozen.yaml').read_bytes()).hexdigest() == '24749a95a1faf84f909911f4f4fc0c59ee5b514c63b4f440efa64b2ea165fcf3'
+          print('TASK15_REAL100_IDENTITY_GUARD=PASS')
+          PY
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        working-directory: work
+        run: python -m pip install -e '.[dev]'
+      - name: Reconstruct deterministic 100 child from formal 5K
+        working-directory: work
+        run: python ../ci-source/ci/task15_real100_prepare.py
+      - name: Execute full production pipeline on 100 real records
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          college-builder run \
+            --input /tmp/task15-real100-sample.jsonl \
+            --config config/pilot-5k-frozen.yaml \
+            --workspace /tmp/task15-real100-workspace \
+            --output /tmp/task15-real100-output
+      - name: Build certification evidence
+        working-directory: work
+        run: python ../ci-source/ci/task15_real100_report.py
+      - name: Certification sanity guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('/tmp/task15-real100-certification/run_report.json').read_text(encoding='utf-8'))
+          assert report['exact_code_sha'] == 'd3b35964ac92d799405fd88101fa11fd05ff1460'
+          assert report['five_k_sample_sha256'] == 'e9d7b957a092114da35dbb839319a08ab555692a8a06863faf2b1980c2a681c5'
+          assert report['hundred_sample_sha256'] == 'ae513933791c2ac27d3916a4149193c2477e00ce993c59b597b27ad02101ae8e'
+          assert report['raw_count'] == 100
+          assert report['provider_errors'] == 0
+          assert report['classifier'] == {'provider': 'openai_compatible', 'model': 'deepseek-flash'}
+          assert report['verifier'] == {'provider': 'openai_compatible', 'model': 'deepseek-v4-pro'}
+          assert 'VERIFIER_NOT_INDEPENDENT' not in report['reject_reason_counts']
+          if not report['tokens_available']:
+              assert report['tokens'] is None
+          if not report['estimated_cost_usd_available']:
+              assert report['estimated_cost_usd'] is None
+          print('TASK15_REAL100_CERTIFICATION=PASS')
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: task15-real100-certification
+          path: /tmp/task15-real100-certification/
+          if-no-files-found: error
+          retention-days: 30
