@@ -12,9 +12,9 @@ from college_builder.pipeline.pilot import (
     CertificationSamplePlan,
     FiveKPilotPlan,
     build_certification_sample,
-    build_pilot_sample,
+    sample_stackmathqa_source_root,
 )
-from college_builder.source.stackmathqa import OFFICIAL_SOURCE_FILES, StackMathQAAdapter
+from college_builder.source.stackmathqa import OFFICIAL_SOURCE_FILES
 
 REVISION = "13239ec8c8078bc8dfb43e1383069eb9be000ff7"
 REVISION_TOKEN = f"git:{REVISION}"
@@ -39,29 +39,11 @@ def _download_sources() -> dict[str, str]:
     return hashes
 
 
-def _records():
-    for filename in OFFICIAL_SOURCE_FILES:
-        adapter = StackMathQAAdapter()
-        descriptor = tuple(
-            adapter.discover(
-                {
-                    "data_file": str(SOURCE_ROOT / filename),
-                    "revision": REVISION_TOKEN,
-                    "license_metadata": {
-                        "declared": "CC-BY-4.0",
-                        "status": "UPSTREAM_DECLARED",
-                    },
-                }
-            )
-        )[0]
-        yield from adapter.acquire(descriptor)
-
-
 def _build_parent():
-    return build_pilot_sample(
-        _records(),
+    return sample_stackmathqa_source_root(
+        SOURCE_ROOT,
+        source_revision=REVISION_TOKEN,
         plan=FiveKPilotPlan(seed=SEED),
-        source_revisions={"stackmathqa": REVISION_TOKEN},
     )
 
 
