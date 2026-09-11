@@ -71,13 +71,16 @@ jobs:
               'analysis': 0.98,
               'qa_alignment': 0.995,
           }
-          assert config['providers']['classifier'] == {
-              'provider': 'openai_compatible',
-              'model': 'deepseek-flash',
-          }
-          assert config['providers']['verifier'] == {
-              'provider': 'openai_compatible',
-              'model': 'deepseek-v4-pro',
+          assert config['providers']['classifier']['name'] == 'openai_compatible'
+          assert config['providers']['classifier']['model'] == 'deepseek-flash'
+          assert config['providers']['verifier']['name'] == 'openai_compatible'
+          assert config['providers']['verifier']['model'] == 'deepseek-v4-pro'
+          assert config['prompt_versions'] == {
+              'university_classify': 'v1',
+              'problem_classify': 'v1',
+              'analysis_classify': 'v2',
+              'qa_alignment': 'v1',
+              'correctness_verify': 'v1',
           }
 
           report = json.loads(Path('artifacts/100/run_report.json').read_text(encoding='utf-8'))
@@ -94,10 +97,15 @@ jobs:
           assert sample['parent_sample_sha256'] == 'e9d7b957a092114da35dbb839319a08ab555692a8a06863faf2b1980c2a681c5'
           assert sample['sample_sha256'] == 'ae513933791c2ac27d3916a4149193c2477e00ce993c59b597b27ad02101ae8e'
           assert sample['total'] == 100
+          assert sample['quotas'] == {'math': 40, 'mathoverflow': 20, 'physics': 20, 'statistics': 20}
 
           five_k = json.loads(Path('artifacts/5k/sampling_certification.json').read_text(encoding='utf-8'))
+          assert five_k['exact_code_sha'] == 'd3b35964ac92d799405fd88101fa11fd05ff1460'
           assert five_k['sample_sha256'] == 'e9d7b957a092114da35dbb839319a08ab555692a8a06863faf2b1980c2a681c5'
           assert five_k['total'] == 5000
+          assert five_k['model_calls'] == 0
+          assert five_k['deterministic_reproduction'] is True
+          assert five_k['strata'] == {'math': 2000, 'mathoverflow': 1000, 'physics': 1000, 'statistics': 1000}
           print('TASK15_FROZEN_IDENTITY_AND_EVIDENCE=PASS')
           PY
 
