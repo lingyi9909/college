@@ -1,0 +1,89 @@
+name: Task 15 Gold Usage GREEN
+
+on:
+  push:
+    branches: [ci/task15-gold-usage-prep]
+
+permissions:
+  contents: write
+
+jobs:
+  green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ci-source
+      - uses: actions/checkout@v4
+        with:
+          ref: 40e6c9f8365aae42a1568e4a2a2387715e2ce5de
+          fetch-depth: 0
+          path: work
+      - name: Assert exact feature HEAD
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "40e6c9f8365aae42a1568e4a2a2387715e2ce5de"
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        working-directory: work
+        run: python -m pip install -e '.[dev]'
+      - name: Apply Gold pack and usage evidence patches
+        working-directory: work
+        run: |
+          python ../ci-source/ci/task15_gold_pack_patch.py
+          python ../ci-source/ci/task15_gold_usage_patch.py
+      - name: Format changed files
+        working-directory: work
+        run: |
+          ruff check --fix src/college_builder/providers/openai_compatible.py src/college_builder/reporting/pilot_report.py src/college_builder/pipeline/runner.py tests/e2e/test_gold_regression.py tests/e2e/test_pipeline_report.py tests/unit/providers/test_openai_compatible_resilience.py
+          ruff format src/college_builder/providers/openai_compatible.py src/college_builder/reporting/pilot_report.py src/college_builder/pipeline/runner.py tests/e2e/test_gold_regression.py tests/e2e/test_pipeline_report.py tests/unit/providers/test_openai_compatible_resilience.py
+      - name: Gold regression GREEN
+        working-directory: work
+        run: pytest -q tests/e2e/test_gold_regression.py tests/e2e/test_task15_calibration_holdout.py
+      - name: Usage evidence GREEN
+        working-directory: work
+        run: pytest -q tests/unit/providers/test_openai_compatible_resilience.py tests/e2e/test_pipeline_report.py tests/unit/test_provider_config_resilience.py
+      - name: Task 15 related regression
+        working-directory: work
+        run: pytest -q tests/e2e/test_pipeline_resume.py tests/e2e/test_final_export.py tests/e2e/test_task15_pipeline_concurrency.py tests/e2e/test_task15_provider_prompt_protocol.py
+      - name: Ruff
+        working-directory: work
+        run: ruff check src tests
+      - name: MyPy
+        working-directory: work
+        run: mypy src
+      - name: Scope guard
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import subprocess
+          allowed = {
+              'src/college_builder/providers/openai_compatible.py',
+              'src/college_builder/reporting/pilot_report.py',
+              'src/college_builder/pipeline/runner.py',
+              'tests/e2e/test_gold_regression.py',
+              'tests/e2e/test_pipeline_report.py',
+              'tests/unit/providers/test_openai_compatible_resilience.py',
+          }
+          actual = set(subprocess.check_output(['git','diff','--name-only'], text=True).splitlines())
+          assert actual == allowed, (actual, allowed)
+          PY
+      - name: Commit and push feature
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name lingyi9909
+          git config user.email zhanhui9909@gmail.com
+          git add src/college_builder/providers/openai_compatible.py src/college_builder/reporting/pilot_report.py src/college_builder/pipeline/runner.py tests/e2e/test_gold_regression.py tests/e2e/test_pipeline_report.py tests/unit/providers/test_openai_compatible_resilience.py
+          git commit -m "test: certify Task 15 gold pack and usage evidence"
+          git push origin HEAD:feature/task15-pilot-freeze
+          echo TASK15_GOLD_USAGE_HEAD=$(git rev-parse HEAD)
