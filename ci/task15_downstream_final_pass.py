@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 import task15_downstream_micro as micro
+
 from college_builder.domain.evidence import GateVerdict
 from college_builder.domain.question import (
     AnalysisContent,
