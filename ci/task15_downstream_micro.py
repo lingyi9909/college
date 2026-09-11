@@ -37,14 +37,14 @@ HUNDRED_SAMPLE_SHA = "ae513933791c2ac27d3916a4149193c2477e00ce993c59b597b27ad021
 CONFIG_VERSION = "pilot-5k-frozen-v1"
 
 SELECTED = {
-    "raw_stackmathqa_1c4381e616889f6b78d899c8520c891cc6416683e764225410193b1962f9b0c8": {
-        "raw_sha256": "1c8d1511d6e8b04e3fbe0e9dcc043f6e1cafefb680e63073d7a4f2b2c00ccd19",
-        "answer": r"\frac{1}{2}",
-        "start": 352,
-        "end": 363,
-        "discipline": Discipline.STATISTICS,
+    "raw_stackmathqa_36383322c62efa98ac513621c69ff25f05bdb72a2c74dadc9870c33f8b9c030d": {
+        "raw_sha256": "e32e233508cb23c63e5eee7024e7ea15eaa6a667cf636cd2826108205868c1ea",
+        "answer": "$B$ is an open set.",
+        "start": 305,
+        "end": 324,
+        "discipline": Discipline.MATHEMATICS,
         "problem_type": ProblemType.PROOF,
-        "analysis_type": AnalysisType.STEP_BY_STEP,
+        "analysis_type": AnalysisType.PROOF,
     },
     "raw_stackmathqa_02710c86aaba8c5134a75a6a9932a022057f16b6da36955041ca4e053f3912d7": {
         "raw_sha256": "2d394cda5cdc5a0cd3d014c047df0840acc9ed7873c05d424bff79d47ac1d16a",
@@ -55,13 +55,13 @@ SELECTED = {
         "problem_type": ProblemType.PROOF,
         "analysis_type": AnalysisType.PROOF,
     },
-    "raw_stackmathqa_a90f524eb66bd0b1f923e9b2bf418e4a505ecc26c5076a4c30a34056eabbfd10": {
-        "raw_sha256": "c7a236ccf808703e6856d5311f49bb65dfd01ff51e8b25eb87069091847fa039",
-        "answer": r"\lfloor \frac{p-c}{2}\rfloor",
-        "start": 165,
-        "end": 193,
+    "raw_stackmathqa_acad4b62acbb4a6e4284ac9777d02fe98b6180808a3e923e2ef17a9709c0f5e6": {
+        "raw_sha256": "4deb3f4f77b724cc0da2e6722eba372272ba86e2ff6be089c89bf450375e9406",
+        "answer": "logically equivalent",
+        "start": 80,
+        "end": 100,
         "discipline": Discipline.MATHEMATICS,
-        "problem_type": ProblemType.PROOF,
+        "problem_type": ProblemType.CONCEPTUAL,
         "analysis_type": AnalysisType.PROOF,
     },
 }
@@ -70,10 +70,9 @@ SELECTED = {
 def _load_source_records(path: Path) -> dict[str, RawSourceRecord]:
     rows: dict[str, RawSourceRecord] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        record = RawSourceRecord.model_validate_json(line)
-        rows[record.record_id] = record
+        if line.strip():
+            record = RawSourceRecord.model_validate_json(line)
+            rows[record.record_id] = record
     return rows
 
 
@@ -111,18 +110,14 @@ def _selected_candidates(records: dict[str, RawSourceRecord]):
 
 def main() -> None:
     source_root = Path(os.environ.get("TASK15_UPSTREAM_DIR", "/tmp/upstream"))
-    sample_path = source_root / "100-sample.jsonl"
-    manifest_path = source_root / "100-manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = json.loads((source_root / "100-manifest.json").read_text(encoding="utf-8"))
     assert manifest["sample_sha256"] == HUNDRED_SAMPLE_SHA
-    records = _load_source_records(sample_path)
+    records = _load_source_records(source_root / "100-sample.jsonl")
     assert len(records) == 100
 
-    base_url = os.environ["OPENAI_COMPATIBLE_BASE_URL"]
-    api_key = os.environ["OPENAI_COMPATIBLE_API_KEY"]
     verifier = OpenAICompatibleStructuredModelProvider(
-        base_url=base_url,
-        api_key=api_key,
+        base_url=os.environ["OPENAI_COMPATIBLE_BASE_URL"],
+        api_key=os.environ["OPENAI_COMPATIBLE_API_KEY"],
         model="deepseek-v4-pro",
         timeout_seconds=90.0,
         max_attempts=3,
@@ -151,75 +146,79 @@ def main() -> None:
     assert len(dedup.kept_record_ids) == 3
     assert not dedup.dropped_record_ids
 
-    irs: list[UniversityQuestionIR] = []
-    evidence_rows: list[dict[str, object]] = []
+    results = []
     for raw, candidate, spec in chosen:
         alignment_result = GateEngine(gates=(alignment,), context=context).run(candidate)
         correctness_result = GateEngine(gates=(correctness,), context=context).run(candidate)
-        evidence_rows.append(
-            {
-                "record_id": raw.record_id,
-                "alignment": alignment_result.evidence[-1].model_dump(mode="json"),
-                "correctness": correctness_result.evidence[-1].model_dump(mode="json"),
-            }
-        )
-        if alignment_result.verdict is not GateVerdict.PASS:
-            raise AssertionError(
-                f"alignment rejected {raw.record_id}: "
-                f"{alignment_result.evidence[-1].model_dump(mode='json')}"
-            )
-        if correctness_result.verdict is not GateVerdict.PASS:
-            raise AssertionError(
-                f"correctness rejected {raw.record_id}: "
-                f"{correctness_result.evidence[-1].model_dump(mode='json')}"
-            )
-
-        start = int(spec["start"])
-        end = int(spec["end"])
-        answer = str(spec["answer"])
-        ir = UniversityQuestionIR(
-            candidate_id=candidate.record_id,
-            source_record_id=raw.record_id,
-            question=QuestionContent(
-                raw=raw.raw_question,
-                normalized=candidate.question,
-                assets=(),
-            ),
-            answer=AnswerContent(
-                raw="",
-                final_answer=answer,
-                source_span=f"analysis:{start}:{end}",
-            ),
-            analysis=AnalysisContent(
-                raw=raw.raw_analysis,
-                type=spec["analysis_type"],
-            ),
-            classification=Classification(
-                discipline=spec["discipline"],
-                course=None,
-                level=UniversityLevel.UNIVERSITY_UNKNOWN,
-                problem_type=spec["problem_type"],
-            ),
-            metadata=QuestionMetadata(language="en"),
-            quality=QualityState(
-                gates=tuple((*alignment_result.evidence, *correctness_result.evidence))
-            ),
-            provenance=QuestionProvenance(
-                source_dataset=raw.source_dataset,
-                source_id=raw.source_id,
-                source_url=raw.source_url,
-                raw_sha256=raw.raw_sha256,
-            ),
-            dedup=DedupState(exact_hash=ExactDeduper().fingerprint(candidate)),
-        )
-        irs.append(ir)
+        results.append((raw, candidate, spec, alignment_result, correctness_result))
 
     out = Path("/tmp/task15-downstream-micro")
     out.mkdir(parents=True, exist_ok=True)
-    Path(out / "evidence.json").write_text(
+    evidence_rows = [
+        {
+            "record_id": raw.record_id,
+            "alignment": alignment_result.evidence[-1].model_dump(mode="json"),
+            "correctness": correctness_result.evidence[-1].model_dump(mode="json"),
+        }
+        for raw, _, _, alignment_result, correctness_result in results
+    ]
+    (out / "evidence.json").write_text(
         json.dumps(evidence_rows, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+    failures = [
+        row
+        for row in evidence_rows
+        if row["alignment"]["verdict"] != GateVerdict.PASS.value
+        or row["correctness"]["verdict"] != GateVerdict.PASS.value
+    ]
+    if failures:
+        raise AssertionError(json.dumps(failures, ensure_ascii=False, sort_keys=True))
+
+    irs: list[UniversityQuestionIR] = []
+    for raw, candidate, spec, alignment_result, correctness_result in results:
+        start = int(spec["start"])
+        end = int(spec["end"])
+        answer = str(spec["answer"])
+        irs.append(
+            UniversityQuestionIR(
+                candidate_id=candidate.record_id,
+                source_record_id=raw.record_id,
+                question=QuestionContent(
+                    raw=raw.raw_question,
+                    normalized=candidate.question,
+                    assets=(),
+                ),
+                answer=AnswerContent(
+                    raw="",
+                    final_answer=answer,
+                    source_span=f"analysis:{start}:{end}",
+                ),
+                analysis=AnalysisContent(
+                    raw=raw.raw_analysis,
+                    type=spec["analysis_type"],
+                ),
+                classification=Classification(
+                    discipline=spec["discipline"],
+                    course=None,
+                    level=UniversityLevel.UNIVERSITY_UNKNOWN,
+                    problem_type=spec["problem_type"],
+                ),
+                metadata=QuestionMetadata(language="en"),
+                quality=QualityState(
+                    gates=tuple((*alignment_result.evidence, *correctness_result.evidence))
+                ),
+                provenance=QuestionProvenance(
+                    source_dataset=raw.source_dataset,
+                    source_id=raw.source_id,
+                    source_url=raw.source_url,
+                    raw_sha256=raw.raw_sha256,
+                ),
+                dedup=DedupState(exact_hash=ExactDeduper().fingerprint(candidate)),
+            )
+        )
+
     export_path = export_jsonl(
         [ExportRecord(ir=ir, stage=RunStage.ACCEPTED) for ir in irs],
         out,
@@ -253,7 +252,7 @@ def main() -> None:
         "tokens_available": verifier.total_tokens is not None,
         "questions_jsonl_sha256": hashlib.sha256(export_path.read_bytes()).hexdigest(),
     }
-    Path(out / "run_report.json").write_text(
+    (out / "run_report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
