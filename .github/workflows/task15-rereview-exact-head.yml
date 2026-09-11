@@ -1,0 +1,86 @@
+name: Task 15 Re-review Exact HEAD
+
+on:
+  push:
+    branches: [verification/task15-rereview-exact-head]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d3b35964ac92d799405fd88101fa11fd05ff1460
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Exact HEAD
+        run: test "$(git rev-parse HEAD)" = "d3b35964ac92d799405fd88101fa11fd05ff1460"
+      - name: Task 15 focused
+        run: >-
+          pytest
+          tests/e2e/test_pilot_5k.py
+          tests/e2e/test_pilot_sample_command.py
+          tests/e2e/test_gold_regression.py
+          tests/e2e/test_task15_calibration_holdout.py
+          tests/e2e/test_task15_pipeline_concurrency.py
+          tests/e2e/test_task15_provider_prompt_protocol.py
+          tests/unit/pipeline/test_pilot.py
+          tests/unit/providers/test_openai_compatible_resilience.py
+          tests/unit/test_provider_config_resilience.py -q
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
+
+  acceptance-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d3b35964ac92d799405fd88101fa11fd05ff1460
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Revised Task 15 committed-evidence contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          failures=[]
+          report_path=Path('artifacts/100/run_report.json')
+          audit_path=Path('docs/validation/100-dry-run-audit.md')
+          if not report_path.is_file():
+              failures.append('missing committed artifacts/100/run_report.json')
+          if not audit_path.is_file():
+              failures.append('missing committed docs/validation/100-dry-run-audit.md')
+          if report_path.is_file():
+              report=json.loads(report_path.read_text(encoding='utf-8'))
+              if report.get('exact_code_sha')!='d3b35964ac92d799405fd88101fa11fd05ff1460':
+                  failures.append('100-run report exact_code_sha mismatch')
+              if report.get('raw_count')!=100:
+                  failures.append('100-run raw_count != 100')
+              if report.get('hundred_strata')!={'math':40,'physics':20,'statistics':20,'mathoverflow':20}:
+                  failures.append('100-run strata mismatch')
+              if report.get('provider_errors')!=0:
+                  failures.append('100-run provider_errors != 0')
+          if audit_path.is_file():
+              text=audit_path.read_text(encoding='utf-8')
+              for marker in ('100','false accept','false reject','ANSWER_NOT_EXTRACTABLE','PROBLEM_TYPE_UNCERTAIN','UNIVERSITY_LEVEL_UNCERTAIN'):
+                  if marker.lower() not in text.lower():
+                      failures.append(f'audit missing marker: {marker}')
+          if failures:
+              print('TASK15_REREVIEW_RED')
+              for failure in failures:
+                  print('-',failure)
+              raise SystemExit(1)
+          print('TASK15_REREVIEW_GREEN')
+          PY
