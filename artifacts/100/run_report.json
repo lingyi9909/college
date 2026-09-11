@@ -1,0 +1,91 @@
+{
+  "acceptance_rate": 0.0,
+  "accepted_count": 0,
+  "cache_hits": 0,
+  "cache_misses": 255,
+  "certification_scope": "task15-100-real-model-e2e",
+  "classifier": {
+    "model": "deepseek-flash",
+    "provider": "openai_compatible"
+  },
+  "config_sha256": "24749a95a1faf84f909911f4f4fc0c59ee5b514c63b4f440efa64b2ea165fcf3",
+  "config_version": "pilot-5k-frozen-v1",
+  "estimated_cost_usd": null,
+  "estimated_cost_usd_available": false,
+  "exact_code_sha": "d3b35964ac92d799405fd88101fa11fd05ff1460",
+  "five_k_sample_sha256": "e9d7b957a092114da35dbb839319a08ab555692a8a06863faf2b1980c2a681c5",
+  "five_k_strata": {
+    "math": 2000,
+    "mathoverflow": 1000,
+    "physics": 1000,
+    "statistics": 1000
+  },
+  "funnel": {
+    "after_dedup": 0,
+    "alignment_pass": 0,
+    "analysis_valid": 0,
+    "answer_valid": 1,
+    "final_accepted": 0,
+    "normalized": 100,
+    "problem": 27,
+    "raw": 100,
+    "stem": 69,
+    "university": 63
+  },
+  "hundred_sample_sha256": "ae513933791c2ac27d3916a4149193c2477e00ce993c59b597b27ad02101ae8e",
+  "hundred_strata": {
+    "math": 40,
+    "mathoverflow": 20,
+    "physics": 20,
+    "statistics": 20
+  },
+  "pipeline_version": "university_dataset_builder_0.1.0",
+  "prompt_sha256": {
+    "analysis_classify": "0e356ccab9cd82709f2dd377a81891f308bf7bd9468c0559fffaaca599ab44f4",
+    "correctness_verify": "c99a28aed954c3c4151b83e9b28d585dc31fa33b4a8ed2470f736b949e700040",
+    "problem_classify": "e80dc9752697918c0d18b7180e564199edc9ff4c95de8040eff7a2a28392c3c6",
+    "qa_alignment": "50d5cbf7cdc13e66b971aeb718b27f5d05a2f11142b47e06b1b5488f31b7923e",
+    "university_classify": "f83951688287baeb2240058d2fb471eac5e092f644dd99ec7b7951d656553bd1"
+  },
+  "prompt_versions": {
+    "analysis_classify": "v2",
+    "correctness_verify": "v1",
+    "problem_classify": "v1",
+    "qa_alignment": "v1",
+    "university_classify": "v1"
+  },
+  "provider_call_counts": {
+    "gate_1_university_stem": 157,
+    "gate_2_problem": 97,
+    "gate_4_original_analysis": 1
+  },
+  "provider_errors": 0,
+  "provider_latency_seconds": 3454.236712238001,
+  "raw_count": 100,
+  "reject_reason_counts": {
+    "ANALYSIS_UNCERTAIN": 1,
+    "ANSWER_NOT_EXTRACTABLE": 26,
+    "MODEL_DECISION_CONFLICT": 9,
+    "NON_STEM": 2,
+    "NOT_PROBLEM": 3,
+    "PROBLEM_TYPE_UNCERTAIN": 28,
+    "UNIVERSITY_LEVEL_UNCERTAIN": 31
+  },
+  "rejected_count": 100,
+  "seed": 20260910,
+  "source_dataset": "math-ai/StackMathQA",
+  "source_file_sha256": {
+    "math.stackexchange.com.jsonl": "c8d4e4b7badc49d4cfe801a5b54b3161689d65ca9c2f0569c54b2db203f992d5",
+    "mathoverflow.net.jsonl": "b4f608c73b5908373263c1598e07713c20f3f8370c82a47f0614ae6826e41073",
+    "physics.stackexchange.com.jsonl": "267e85607d860663b812ea5e72807d5f4559d366bef523b54bba865836259d93",
+    "stats.stackexchange.com.jsonl": "105a6fc5b4da6de018b055a27f1eca82da91b77cc25eae5b780f2e5245462c56"
+  },
+  "source_revision": "git:13239ec8c8078bc8dfb43e1383069eb9be000ff7",
+  "tokens": null,
+  "tokens_available": false,
+  "verifier": {
+    "model": "deepseek-v4-pro",
+    "provider": "openai_compatible"
+  },
+  "wall_time_seconds": 254.619647063
+}
