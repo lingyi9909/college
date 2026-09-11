@@ -6,6 +6,7 @@ import json
 import os
 import random
 import time
+from threading import Lock
 from typing import Any
 
 import httpx
@@ -53,6 +54,17 @@ class OpenAICompatibleStructuredModelProvider:
         self.max_attempts = int(max_attempts)
         self.retry_backoff_seconds = float(retry_backoff_seconds)
         self._client = client or httpx.Client(timeout=self.timeout_seconds)
+        self._usage_lock = Lock()
+        self._total_tokens = 0
+        self._usage_complete = True
+
+    @property
+    def total_tokens(self) -> int | None:
+        """Return consumed tokens only when every successful response exposed usage."""
+        with self._usage_lock:
+            if not self._usage_complete:
+                return None
+            return self._total_tokens
 
     def classify(self, request: ModelClassificationRequest) -> ModelDecision:
         headers = {"Content-Type": "application/json"}
@@ -99,9 +111,32 @@ class OpenAICompatibleStructuredModelProvider:
             json=payload,
         )
         response.raise_for_status()
-        content = _message_content(response.json())
+        try:
+            response_payload = response.json()
+        except (json.JSONDecodeError, ValueError):
+            self._mark_usage_unavailable()
+            raise
+        self._record_usage(response_payload)
+        content = _message_content(response_payload)
         parsed: object = json.loads(content)
         return ModelDecision.model_validate(parsed)
+
+    def _record_usage(self, payload: Any) -> None:
+        usage = payload.get("usage") if isinstance(payload, dict) else None
+        total_tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
+        with self._usage_lock:
+            if (
+                isinstance(total_tokens, int)
+                and not isinstance(total_tokens, bool)
+                and total_tokens >= 0
+            ):
+                self._total_tokens += total_tokens
+            else:
+                self._usage_complete = False
+
+    def _mark_usage_unavailable(self) -> None:
+        with self._usage_lock:
+            self._usage_complete = False
 
 
 def _is_retryable(error: Exception) -> bool:

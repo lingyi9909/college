@@ -228,6 +228,7 @@ class GatePipelineProcessor:
         self._prompt_loader = prompt_loader
         cache = CallCache(cache_path)
         self._usage = _UsageAccumulator(provider_call_counts=Counter())
+        self._usage_providers = (primary_provider, verifier_provider)
         prompt_versions = {
             "gate_1_university_stem": config.prompt_versions.university_classify,
             "gate_2_problem": config.prompt_versions.problem_classify,
@@ -309,8 +310,8 @@ class GatePipelineProcessor:
                 cache_hits=self._usage.cache_hits,
                 cache_misses=self._usage.cache_misses,
                 latency_seconds=self._usage.latency_seconds,
-                tokens=0,
-                estimated_cost_usd=0.0,
+                tokens=_combined_provider_tokens(self._usage_providers),
+                estimated_cost_usd=None,
                 fallback_count=0,
                 provider_errors=self._usage.provider_errors,
             )
@@ -1530,6 +1531,30 @@ def _write_provider_usage(path: Path, usage: ProviderUsage) -> None:
     )
 
 
+def _optional_int_delta(before: int | None, after: int | None) -> int | None:
+    if before is None or after is None:
+        return None
+    return max(0, after - before)
+
+
+def _optional_float_delta(before: float | None, after: float | None) -> float | None:
+    if before is None or after is None:
+        return None
+    return max(0.0, after - before)
+
+
+def _optional_int_sum(left: int | None, right: int | None) -> int | None:
+    if left is None or right is None:
+        return None
+    return left + right
+
+
+def _optional_float_sum(left: float | None, right: float | None) -> float | None:
+    if left is None or right is None:
+        return None
+    return left + right
+
+
 def _provider_usage_delta(before: ProviderUsage, after: ProviderUsage) -> ProviderUsage:
     keys = set(before.provider_call_counts) | set(after.provider_call_counts)
     calls = {
@@ -1542,8 +1567,10 @@ def _provider_usage_delta(before: ProviderUsage, after: ProviderUsage) -> Provid
         cache_hits=max(0, after.cache_hits - before.cache_hits),
         cache_misses=max(0, after.cache_misses - before.cache_misses),
         latency_seconds=max(0.0, after.latency_seconds - before.latency_seconds),
-        tokens=max(0, after.tokens - before.tokens),
-        estimated_cost_usd=max(0.0, after.estimated_cost_usd - before.estimated_cost_usd),
+        tokens=_optional_int_delta(before.tokens, after.tokens),
+        estimated_cost_usd=_optional_float_delta(
+            before.estimated_cost_usd, after.estimated_cost_usd
+        ),
         fallback_count=max(0, after.fallback_count - before.fallback_count),
         provider_errors=max(0, after.provider_errors - before.provider_errors),
     )
@@ -1557,8 +1584,8 @@ def _merge_provider_usage(left: ProviderUsage, right: ProviderUsage) -> Provider
         cache_hits=left.cache_hits + right.cache_hits,
         cache_misses=left.cache_misses + right.cache_misses,
         latency_seconds=left.latency_seconds + right.latency_seconds,
-        tokens=left.tokens + right.tokens,
-        estimated_cost_usd=left.estimated_cost_usd + right.estimated_cost_usd,
+        tokens=_optional_int_sum(left.tokens, right.tokens),
+        estimated_cost_usd=_optional_float_sum(left.estimated_cost_usd, right.estimated_cost_usd),
         fallback_count=left.fallback_count + right.fallback_count,
         provider_errors=left.provider_errors + right.provider_errors,
     )
@@ -1618,6 +1645,16 @@ def _run_id(source_snapshot_hash: str, config_hash: str, pipeline_version: str) 
         }
     )
     return f"run-{fingerprint}"
+
+
+def _combined_provider_tokens(providers: tuple[StructuredModelProvider, ...]) -> int | None:
+    totals: list[int] = []
+    for provider in providers:
+        value = getattr(provider, "total_tokens", None)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return None
+        totals.append(value)
+    return sum(totals)
 
 
 def _hash_json(value: object) -> str:

@@ -41,8 +41,8 @@ class ProviderUsage(_FrozenModel):
     cache_hits: int = Field(default=0, ge=0)
     cache_misses: int = Field(default=0, ge=0)
     latency_seconds: float = Field(default=0.0, ge=0.0)
-    tokens: int = Field(default=0, ge=0)
-    estimated_cost_usd: float = Field(default=0.0, ge=0.0)
+    tokens: int | None = Field(default=None, ge=0)
+    estimated_cost_usd: float | None = Field(default=None, ge=0.0)
     fallback_count: int = Field(default=0, ge=0)
     provider_errors: int = Field(default=0, ge=0)
 
@@ -82,11 +82,15 @@ class PilotReport(_FrozenModel):
     source_distribution: dict[str, DistributionCount]
     subject_distribution: dict[str, DistributionCount]
     provider_call_counts: dict[str, int]
+    cache_hits: int = Field(default=0, ge=0)
+    cache_misses: int = Field(default=0, ge=0)
     cache_hit_rate: float = Field(ge=0.0, le=1.0)
     fallback_count: int = Field(ge=0)
     provider_errors: int = Field(ge=0)
-    tokens: int = Field(ge=0)
-    estimated_cost_usd: float = Field(ge=0.0)
+    tokens: int | None = Field(default=None, ge=0)
+    tokens_available: bool = False
+    estimated_cost_usd: float | None = Field(default=None, ge=0.0)
+    estimated_cost_usd_available: bool = False
     provider_latency_seconds: float = Field(ge=0.0)
     wall_time_seconds: float = Field(ge=0.0)
 
@@ -119,11 +123,15 @@ def build_pilot_report(
         source_distribution=_distribution(rows, "source_dataset"),
         subject_distribution=_distribution(rows, "subject"),
         provider_call_counts=dict(sorted(provider_usage.provider_call_counts.items())),
+        cache_hits=provider_usage.cache_hits,
+        cache_misses=provider_usage.cache_misses,
         cache_hit_rate=(provider_usage.cache_hits / total_cache) if total_cache else 0.0,
         fallback_count=provider_usage.fallback_count,
         provider_errors=provider_usage.provider_errors,
         tokens=provider_usage.tokens,
+        tokens_available=provider_usage.tokens is not None,
         estimated_cost_usd=provider_usage.estimated_cost_usd,
+        estimated_cost_usd_available=provider_usage.estimated_cost_usd is not None,
         provider_latency_seconds=provider_usage.latency_seconds,
         wall_time_seconds=wall_time_seconds,
     )

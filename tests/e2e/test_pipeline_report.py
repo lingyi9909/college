@@ -114,8 +114,13 @@ def test_pilot_report_contains_full_funnel_splits_rejects_and_cost_fields() -> N
     assert report.subject_distribution["MATHEMATICS"].raw == 2
     assert report.subject_distribution["PHYSICS"].accepted == 0
     assert report.provider_call_counts["gate_1_university_stem"] == 4
+    assert report.cache_hits == 5
+    assert report.cache_misses == 7
     assert report.cache_hit_rate == 5 / 12
+    assert report.tokens == 0
+    assert report.tokens_available is True
     assert report.estimated_cost_usd == 0.0
+    assert report.estimated_cost_usd_available is True
     assert report.provider_latency_seconds == 1.25
     assert report.wall_time_seconds == 2.5
     assert report.acceptance_rate == 0.25
@@ -256,3 +261,55 @@ def test_cli_exposes_run_resume_report_and_config_validate(tmp_path: Path) -> No
     validate_result = runner.invoke(app, ["config", "validate", "config/pilot.yaml"])
     assert validate_result.exit_code == 0
     assert "pilot-v1" in validate_result.output
+
+
+def test_pilot_report_marks_unknown_tokens_and_cost_unavailable() -> None:
+    report = build_pilot_report(
+        run_id="run-unknown-usage",
+        audits=(),
+        provider_usage=ProviderUsage(),
+        wall_time_seconds=0.0,
+    )
+    assert report.tokens is None
+    assert report.tokens_available is False
+    assert report.estimated_cost_usd is None
+    assert report.estimated_cost_usd_available is False
+
+
+def test_provider_usage_delta_and_merge_preserve_unavailable_usage() -> None:
+    from college_builder.pipeline.runner import _merge_provider_usage, _provider_usage_delta
+
+    unknown = ProviderUsage(
+        provider_call_counts={"gate": 1},
+        cache_misses=1,
+        tokens=None,
+        estimated_cost_usd=None,
+    )
+    known = ProviderUsage(
+        provider_call_counts={"gate": 2},
+        cache_misses=2,
+        tokens=10,
+        estimated_cost_usd=0.25,
+    )
+
+    delta = _provider_usage_delta(unknown, known)
+    assert delta.tokens is None
+    assert delta.estimated_cost_usd is None
+
+    merged = _merge_provider_usage(known, unknown)
+    assert merged.tokens is None
+    assert merged.estimated_cost_usd is None
+
+
+def test_provider_usage_delta_and_merge_keep_known_numeric_usage() -> None:
+    from college_builder.pipeline.runner import _merge_provider_usage, _provider_usage_delta
+
+    before = ProviderUsage(tokens=3, estimated_cost_usd=0.1)
+    after = ProviderUsage(tokens=11, estimated_cost_usd=0.4)
+    delta = _provider_usage_delta(before, after)
+    assert delta.tokens == 8
+    assert delta.estimated_cost_usd == 0.30000000000000004
+
+    merged = _merge_provider_usage(before, after)
+    assert merged.tokens == 14
+    assert merged.estimated_cost_usd == 0.5
