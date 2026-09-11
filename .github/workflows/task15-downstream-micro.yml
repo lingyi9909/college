@@ -42,9 +42,9 @@ jobs:
       - name: Preflight micro script before model calls
         working-directory: work
         run: |
-          ruff format ../ci-source/ci/task15_downstream_micro.py
-          python -m py_compile ../ci-source/ci/task15_downstream_micro.py
-          ruff check --ignore E501 ../ci-source/ci/task15_downstream_micro.py
+          ruff format ../ci-source/ci/task15_downstream_micro.py ../ci-source/ci/task15_downstream_micro_v2.py
+          python -m py_compile ../ci-source/ci/task15_downstream_micro.py ../ci-source/ci/task15_downstream_micro_v2.py
+          ruff check --ignore E501 ../ci-source/ci/task15_downstream_micro.py ../ci-source/ci/task15_downstream_micro_v2.py
       - name: Download certified real-100 source artifact
         shell: bash
         run: |
@@ -55,7 +55,7 @@ jobs:
           test -f /tmp/upstream/100-manifest.json
       - name: Run three-record real-model downstream certification
         working-directory: work
-        run: python ../ci-source/ci/task15_downstream_micro.py
+        run: PYTHONPATH=../ci-source/ci python ../ci-source/ci/task15_downstream_micro_v2.py
       - name: Certification sanity guard
         shell: bash
         run: |
