@@ -39,6 +39,7 @@ jobs:
           python ../ci-source/ci/task15_gold_pack_patch.py
           python ../ci-source/ci/task15_gold_usage_patch.py
           python ../ci-source/ci/task15_usage_optional_patch.py
+          python ../ci-source/ci/task15_usage_mypy_patch.py
       - name: Format changed files
         working-directory: work
         run: |
