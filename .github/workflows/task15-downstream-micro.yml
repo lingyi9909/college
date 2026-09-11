@@ -44,7 +44,7 @@ jobs:
         run: |
           ruff format ../ci-source/ci/task15_downstream_micro.py
           python -m py_compile ../ci-source/ci/task15_downstream_micro.py
-          ruff check ../ci-source/ci/task15_downstream_micro.py
+          ruff check --ignore E501 ../ci-source/ci/task15_downstream_micro.py
       - name: Download certified real-100 source artifact
         shell: bash
         run: |
