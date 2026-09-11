@@ -1,0 +1,82 @@
+name: Task 15 Rebaseline Precertification
+
+on:
+  push:
+    branches: [ci/task15-rebaseline-precert]
+
+permissions:
+  contents: read
+
+jobs:
+  precert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d3b35964ac92d799405fd88101fa11fd05ff1460
+      - name: Assert exact Task 15 HEAD
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "d3b35964ac92d799405fd88101fa11fd05ff1460"
+          test -z "${OPENAI_COMPATIBLE_BASE_URL:-}"
+          test -z "${OPENAI_COMPATIBLE_API_KEY:-}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Reviewer-focused Task 15 suite
+        run: >-
+          pytest
+          tests/e2e/test_pilot_5k.py
+          tests/e2e/test_pilot_sample_command.py
+          tests/e2e/test_gold_regression.py
+          tests/e2e/test_task15_pipeline_concurrency.py
+          tests/e2e/test_task15_provider_prompt_protocol.py
+          tests/unit/pipeline/test_pilot.py
+          tests/unit/providers/test_openai_compatible_resilience.py
+          tests/unit/test_provider_config_resilience.py
+          -q
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
+      - name: Frozen config and identity guard
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          from college_builder.config import PipelineConfig
+          path = Path('config/pilot-5k-frozen.yaml')
+          sha = hashlib.sha256(path.read_bytes()).hexdigest()
+          cfg = PipelineConfig.load(path)
+          assert sha == '24749a95a1faf84f909911f4f4fc0c59ee5b514c63b4f440efa64b2ea165fcf3', sha
+          assert cfg.config_version == 'pilot-5k-frozen-v1'
+          assert cfg.providers.classifier.name == 'openai_compatible'
+          assert cfg.providers.classifier.model == 'deepseek-flash'
+          assert cfg.providers.verifier.name == 'openai_compatible'
+          assert cfg.providers.verifier.model == 'deepseek-v4-pro'
+          assert cfg.thresholds.university == 0.98
+          assert cfg.thresholds.problem == 0.98
+          assert cfg.thresholds.answer_extract == 0.995
+          assert cfg.thresholds.analysis == 0.98
+          assert cfg.thresholds.qa_alignment == 0.995
+          assert cfg.prompt_versions.university_classify == 'v1'
+          assert cfg.prompt_versions.problem_classify == 'v1'
+          assert cfg.prompt_versions.analysis_classify == 'v2'
+          assert cfg.prompt_versions.qa_alignment == 'v1'
+          assert cfg.prompt_versions.correctness_verify == 'v1'
+          print('TASK15_CONFIG_SHA256=' + sha)
+          print('TASK15_CONFIG_IDENTITY=PASS')
+          PY
+      - name: Scope and raw-data guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git ls-files 'artifacts/5k/sample.jsonl' 'artifacts/100/sample.jsonl')"
+          test -z "$(git ls-files '.github/workflows/task15-*')"
+          echo TASK15_SCOPE_RAW_GUARD=PASS
