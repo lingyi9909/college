@@ -1,0 +1,81 @@
+name: Task 15 Downstream Real-Model Micro Certification
+
+on:
+  push:
+    branches: [ci/task15-downstream-micro]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  downstream-micro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OPENAI_COMPATIBLE_BASE_URL: ${{ secrets.TASK15_OPENAI_BASE_URL }}
+      OPENAI_COMPATIBLE_API_KEY: ${{ secrets.TASK15_OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ci-source
+      - uses: actions/checkout@v4
+        with:
+          ref: 01ab7f86b62d614239a3d5ceae6b83821cc9f664
+          path: work
+      - name: Guard exact feature identity and model secrets
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "01ab7f86b62d614239a3d5ceae6b83821cc9f664"
+          test -n "$OPENAI_COMPATIBLE_BASE_URL"
+          test -n "$OPENAI_COMPATIBLE_API_KEY"
+          echo TASK15_DOWNSTREAM_IDENTITY_GUARD=PASS
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        working-directory: work
+        run: python -m pip install -e '.[dev]'
+      - name: Preflight micro script before model calls
+        working-directory: work
+        run: |
+          python -m py_compile ../ci-source/ci/task15_downstream_micro.py
+          ruff check ../ci-source/ci/task15_downstream_micro.py
+      - name: Download certified real-100 source artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/upstream
+          gh run download 34558426996 --repo lingyi9909/college --name task15-real100-certification --dir /tmp/upstream
+          test -f /tmp/upstream/100-sample.jsonl
+          test -f /tmp/upstream/100-manifest.json
+      - name: Run three-record real-model downstream certification
+        working-directory: work
+        run: python ../ci-source/ci/task15_downstream_micro.py
+      - name: Certification sanity guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('/tmp/task15-downstream-micro/run_report.json')
+          r = json.loads(p.read_text(encoding='utf-8'))
+          assert r['feature_sha'] == '01ab7f86b62d614239a3d5ceae6b83821cc9f664'
+          assert r['record_count'] == 3
+          assert r['gate5_pass_count'] == 3
+          assert r['correctness_pass_count'] == 3
+          assert r['final_dedup_kept_count'] == 3
+          assert r['final_export_count'] == 3
+          assert r['exact_19_field_valid'] is True
+          print('TASK15_DOWNSTREAM_MICRO_SANITY=PASS')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: task15-downstream-real-model-micro
+          path: /tmp/task15-downstream-micro/
+          if-no-files-found: error
+          retention-days: 30
