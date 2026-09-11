@@ -1,0 +1,124 @@
+name: Task 15 Final Independent Review 5572
+
+on:
+  push:
+    branches: [verification/task15-final-independent-5572]
+
+permissions:
+  contents: read
+
+jobs:
+  independent-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 5572fe691a866d048309806a8db051244a2d46d3
+          fetch-depth: 0
+      - name: Exact production/evidence lineage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "5572fe691a866d048309806a8db051244a2d46d3"
+          python - <<'PY'
+          import subprocess
+          certified='d3b35964ac92d799405fd88101fa11fd05ff1460'
+          expected={
+            'artifacts/100/run_report.json',
+            'artifacts/100/sample_manifest.json',
+            'artifacts/5k/sampling_certification.json',
+            'docs/validation/100-dry-run-audit.md',
+            'docs/validation/task15-downstream-micro-evidence.md',
+          }
+          changed=set(subprocess.check_output(['git','diff','--name-only',f'{certified}..HEAD'],text=True).splitlines())
+          assert changed == expected, (changed, expected)
+          print('TASK15_INDEPENDENT_LINEAGE=PASS')
+          PY
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Evidence contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, re
+          from pathlib import Path
+          import yaml
+
+          code='d3b35964ac92d799405fd88101fa11fd05ff1460'
+          five_sha='e9d7b957a092114da35dbb839319a08ab555692a8a06863faf2b1980c2a681c5'
+          hundred_sha='ae513933791c2ac27d3916a4149193c2477e00ce993c59b597b27ad02101ae8e'
+          config_sha='24749a95a1faf84f909911f4f4fc0c59ee5b514c63b4f440efa64b2ea165fcf3'
+
+          cfgp=Path('config/pilot-5k-frozen.yaml')
+          assert hashlib.sha256(cfgp.read_bytes()).hexdigest()==config_sha
+          cfg=yaml.safe_load(cfgp.read_text())
+          assert cfg['providers']['classifier']=={'name':'openai_compatible','model':'deepseek-flash','timeout_seconds':60.0,'max_attempts':3,'retry_backoff_seconds':1.0}
+          assert cfg['providers']['verifier']=={'name':'openai_compatible','model':'deepseek-v4-pro','timeout_seconds':90.0,'max_attempts':3,'retry_backoff_seconds':1.0}
+
+          five=json.loads(Path('artifacts/5k/sampling_certification.json').read_text())
+          assert five['status']=='PASS' and five['exact_code_sha']==code
+          assert five['sample_sha256']==five_sha and five['total']==5000 and five['model_calls']==0
+          assert five['deterministic_reproduction'] is True
+          assert five['strata']=={'math':2000,'mathoverflow':1000,'physics':1000,'statistics':1000}
+
+          sample=json.loads(Path('artifacts/100/sample_manifest.json').read_text())
+          assert sample['parent_sample_sha256']==five_sha and sample['sample_sha256']==hundred_sha
+          assert sample['total']==100 and sample['quotas']=={'math':40,'mathoverflow':20,'physics':20,'statistics':20}
+          assert len(sample['sampled_record_ids'])==100 and len(sample['sampled_raw_sha256'])==100
+
+          report=json.loads(Path('artifacts/100/run_report.json').read_text())
+          assert report['exact_code_sha']==code and report['config_sha256']==config_sha
+          assert report['five_k_sample_sha256']==five_sha and report['hundred_sample_sha256']==hundred_sha
+          assert report['raw_count']==100 and report['accepted_count']==0 and report['rejected_count']==100
+          assert report['provider_errors']==0
+          assert report['classifier']=={'provider':'openai_compatible','model':'deepseek-flash'}
+          assert report['verifier']=={'provider':'openai_compatible','model':'deepseek-v4-pro'}
+          assert report['tokens'] is None and report['tokens_available'] is False
+          assert report['estimated_cost_usd'] is None and report['estimated_cost_usd_available'] is False
+
+          audit=Path('docs/validation/100-dry-run-audit.md').read_text()
+          rows=re.findall(r'^\|\s*(\d+)\s*\|', audit, flags=re.M)
+          nums=[int(x) for x in rows if x.isdigit()]
+          # First numeric table rows are the 100 per-record audit rows.
+          assert set(range(1,101)).issubset(set(nums)), (min(nums), max(nums), len(nums))
+          assert '**43/100 FALSE_REJECT**' in audit
+          assert '**57/100 REJECT_CONFIRMED**' in audit
+          assert 'False accepts: **0**' in audit
+          assert 'must not be treated as production-final' in audit
+
+          micro=Path('docs/validation/task15-downstream-micro-evidence.md').read_text()
+          assert 'Run `34589616128`' in micro and 'Run `34590949726`' in micro
+          assert 'CORRECTNESS_EVIDENCE_INVALID' in micro
+          assert 'fail-closed' in micro
+          assert 'should not be interpreted as proof of production-final throughput' in micro
+
+          changed=subprocess_check=['git','diff','--name-only','c7a57d9142156232444d2e7f8fc83031d09d039e..HEAD']
+          import subprocess
+          names=subprocess.check_output(changed=subprocess_check if False else subprocess_check,text=True).splitlines()
+          assert not any('task16' in n.lower() for n in names)
+          print('TASK15_INDEPENDENT_EVIDENCE=PASS')
+          PY
+      - name: Task 15 focused + holdout
+        run: >-
+          pytest
+          tests/e2e/test_pilot_5k.py
+          tests/e2e/test_pilot_sample_command.py
+          tests/e2e/test_gold_regression.py
+          tests/e2e/test_task15_calibration_holdout.py
+          tests/e2e/test_task15_pipeline_concurrency.py
+          tests/e2e/test_task15_provider_prompt_protocol.py
+          tests/unit/pipeline/test_pilot.py
+          tests/unit/providers/test_openai_compatible_resilience.py
+          tests/unit/test_provider_config_resilience.py
+          -q
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
