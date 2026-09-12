@@ -112,7 +112,7 @@ class _DualProviderClassificationGate:
             )
 
         if primary.score >= self.pass_threshold:
-            return self._finalize_high_band(primary, context, primary_evidence)
+            return self._finalize_high_band(primary, candidate, context, primary_evidence)
 
         if primary.score < self.verify_threshold:
             return self._result(
@@ -189,7 +189,10 @@ class _DualProviderClassificationGate:
                 evidence_payload=evidence_payload,
             )
 
-        if not _has_content_evidence(primary) or not _has_content_evidence(verifier):
+        if not self._has_positive_evidence(primary, candidate) or not self._has_positive_evidence(
+            verifier,
+            candidate,
+        ):
             return self._result(
                 context,
                 verdict=GateVerdict.REJECT,
@@ -209,6 +212,7 @@ class _DualProviderClassificationGate:
     def _finalize_high_band(
         self,
         primary: ModelDecision,
+        candidate: NormalizedQA,
         context: GateContext,
         evidence_payload: dict[str, JsonValue],
     ) -> GateResultEvidence:
@@ -220,7 +224,7 @@ class _DualProviderClassificationGate:
                 reason_code=self._semantic_reject_reason(primary.label),
                 evidence_payload=evidence_payload,
             )
-        if not _has_content_evidence(primary):
+        if not self._has_positive_evidence(primary, candidate):
             return self._result(
                 context,
                 verdict=GateVerdict.REJECT,
@@ -235,6 +239,14 @@ class _DualProviderClassificationGate:
             reason_code=self.pass_reason,
             evidence_payload=evidence_payload,
         )
+
+    def _has_positive_evidence(
+        self,
+        decision: ModelDecision,
+        candidate: NormalizedQA,
+    ) -> bool:
+        del candidate
+        return _has_content_evidence(decision)
 
     def _semantic_reject_reason(self, label: str) -> str:
         return self.reject_reasons.get(label, self.uncertain_reason)
@@ -329,6 +341,13 @@ class ProblemGate(_DualProviderClassificationGate):
     pass_reason = "PROBLEM_CONFIRMED"
     verify_reason = "PROBLEM_REVIEW_REQUIRED"
 
+    def _has_positive_evidence(
+        self,
+        decision: ModelDecision,
+        candidate: NormalizedQA,
+    ) -> bool:
+        return _has_grounded_problem_evidence(decision, candidate.question)
+
 
 def _classification_inputs(candidate: NormalizedQA) -> dict[str, JsonValue]:
     dump = candidate.model_dump(mode="json")
@@ -373,3 +392,46 @@ def _has_content_evidence(decision: ModelDecision) -> bool:
         reference.strip().lower().startswith(_CONTENT_EVIDENCE_PREFIXES)
         for reference in decision.evidence_references
     )
+
+
+def _has_grounded_problem_evidence(decision: ModelDecision, question: str) -> bool:
+    return any(
+        _is_grounded_problem_reference(reference, question)
+        for reference in decision.evidence_references
+    )
+
+
+def _is_grounded_problem_reference(reference: str, question: str) -> bool:
+    stripped = reference.strip()
+    lowered = stripped.lower()
+    payload: str | None = None
+    for prefix in _CONTENT_EVIDENCE_PREFIXES:
+        if lowered.startswith(prefix):
+            payload = stripped[len(prefix) :].strip()
+            break
+    if not payload:
+        return False
+
+    if len(payload) >= 2 and payload[0] == payload[-1] and payload[0] in {'"', "'"}:
+        payload = payload[1:-1].strip()
+        if not payload:
+            return False
+
+    span_parts = payload.split("-")
+    if len(span_parts) == 2 and all(part.isdigit() for part in span_parts):
+        start, end = (int(part) for part in span_parts)
+        return 0 <= start < end <= len(question) and bool(question[start:end].strip())
+
+    if "..." not in payload:
+        return payload in question
+
+    segments = [segment.strip() for segment in payload.split("...") if segment.strip()]
+    if not segments:
+        return False
+    cursor = 0
+    for segment in segments:
+        position = question.find(segment, cursor)
+        if position < 0:
+            return False
+        cursor = position + len(segment)
+    return True
