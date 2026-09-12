@@ -397,3 +397,85 @@ def test_answer_analysis_golden_analysis_reject_cases_remain_fail_closed() -> No
         assert evidence.verdict is GateVerdict.REJECT
         assert len(primary.requests) == 0
         assert len(verifier.requests) == 0
+
+
+def test_task15_real_gate4_textual_span_reference_remains_fail_closed() -> None:
+    analysis = (
+        "@Alex Francisco has provided a proof by contradiction. Here's a direct proof:\n"
+        "Since $(a_{n})$ is bounded, then $-\\infty<\\liminf_{n}a_{n}"
+        "\\leq\\limsup_{n}a_{n}<\\infty$. And there are subsequences $(a_{n_{k}})$ "
+        "and $(a_{m_{l}})$ such that $a_{n_{k}}\\rightarrow\\limsup_{n}a_{n}$ and "
+        "$a_{m_{l}}\\rightarrow\\liminf_{n}a_{n}$. Such two subsequences are "
+        "convergent, so by assumption we have both $a_{n_{k}}\\rightarrow L$ and "
+        "$a_{m_{l}}\\rightarrow L$.\nTherefore, $\\liminf_{n}a_{n}="
+        "\\limsup_{n}a_{n}=L$, in other words, $\\lim_{n}a_{n}=L$.\n"
+    )
+    task15_references = (
+        "analysis:<span>Since $(a_{n})$ is bounded, then $-\\infty<\\liminf_{n}a_{n}"
+        "\\leq\\limsup_{n}a_{n}<\\infty$.</span>",
+        "analysis:<span>And there are subsequences $(a_{n_{k}})$ and $(a_{m_{l}})$ "
+        "such that $a_{n_{k}}\\rightarrow\\limsup_{n}a_{n}$ and "
+        "$a_{m_{l}}\\rightarrow\\liminf_{n}a_{n}$.</span>",
+        "analysis:<span>Such two subsequences are convergent, so by assumption we "
+        "have both $a_{n_{k}}\\rightarrow L$ and $a_{m_{l}}\\rightarrow L$.</span>",
+        "analysis:<span>Therefore, $\\liminf_{n}a_{n}=\\limsup_{n}a_{n}=L$, in other "
+        "words, $\\lim_{n}a_{n}=L$.</span>",
+    )
+    candidate = NormalizedQA(
+        record_id="norm-task15-gate4-35",
+        source_record_id=(
+            "raw_stackmathqa_02710c86aaba8c5134a75a6a9932a022057f16b6da36955041ca4e053f3912d7"
+        ),
+        question="Prove that the bounded sequence converges to L.",
+        answer="",
+        analysis=analysis,
+        subject_candidates=("mathematics",),
+        images=(),
+        metadata={
+            "task15_source_id": "math:2621527:0",
+            "task15_raw_sha256": (
+                "2d394cda5cdc5a0cd3d014c047df0840acc9ed7873c05d424bff79d47ac1d16a"
+            ),
+            "task15_run_id": 34558426996,
+            "task15_artifact_id": 10183643305,
+        },
+        normalization_evidence={},
+    )
+    gate, primary, verifier = _gate(
+        _decision(
+            "PROOF",
+            1.0,
+            evidence_references=task15_references,
+        )
+    )
+
+    evidence = _run(gate, candidate)
+
+    assert evidence.verdict is GateVerdict.REJECT
+    assert evidence.reason_code == "ANALYSIS_UNCERTAIN"
+    assert len(primary.requests) == 1
+    assert len(verifier.requests) == 0
+
+
+def test_gate4_valid_half_open_boundary_span_passes() -> None:
+    analysis = "....x"
+    gate, _, _ = _gate(
+        _decision("PROOF", 0.99, evidence_references=("analysis:0-5",))
+    )
+
+    evidence = _run(gate, _candidate(analysis=analysis))
+
+    assert evidence.verdict is GateVerdict.PASS
+    assert evidence.reason_code == "ANALYSIS_CONFIRMED"
+
+
+def test_gate4_does_not_reinterpret_inclusive_end_reference() -> None:
+    analysis = "....x"
+    gate, _, _ = _gate(
+        _decision("PROOF", 0.99, evidence_references=("analysis:0-4",))
+    )
+
+    evidence = _run(gate, _candidate(analysis=analysis))
+
+    assert evidence.verdict is GateVerdict.REJECT
+    assert evidence.reason_code == "ANALYSIS_UNCERTAIN"
