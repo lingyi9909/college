@@ -16,7 +16,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       OPENAI_COMPATIBLE_BASE_URL: ${{ secrets.TASK15_OPENAI_BASE_URL }}
       OPENAI_COMPATIBLE_API_KEY: ${{ secrets.TASK15_OPENAI_API_KEY }}
-      TASK16B_CODE_SHA: 8e35645a016770d6db635a698617c03b9a07fc46
+      TASK16B_CODE_SHA: 456174b0ed0497239733ddd2909eea39eda83ecb
       TASK16B_SAMPLE_SHA: 50026b04d0d5a55a27c8a796f54f35eeea756410835a82c29bbd155013d08304
     steps:
       - uses: actions/checkout@v4
@@ -24,7 +24,7 @@ jobs:
           path: ci-source
       - uses: actions/checkout@v4
         with:
-          ref: 8e35645a016770d6db635a698617c03b9a07fc46
+          ref: 456174b0ed0497239733ddd2909eea39eda83ecb
           path: work
       - name: Guard exact production identity and model secrets
         working-directory: work
@@ -40,9 +40,11 @@ jobs:
           from pathlib import Path
           import yaml
           manifest = json.loads(Path('artifacts/task16/re-certification/sample_manifest.json').read_text(encoding='utf-8'))
+          assert manifest['schema_version'] == 'task16-small-recert-sample-v2'
           assert manifest['selection_frozen_before_model_calls'] is True
           assert manifest['sample']['total'] == 50
-          assert manifest['sample']['sample_sha256'] == '50026b04d0d5a55a27c8a796f54f35eeea756410835a82c29bbd155013d08304'
+          assert manifest['sample']['sample_payload_sha256'] == '50026b04d0d5a55a27c8a796f54f35eeea756410835a82c29bbd155013d08304'
+          assert len(manifest['records']) == 50
           config = yaml.safe_load(Path('config/task16-recertification.yaml').read_text(encoding='utf-8'))
           assert config['config_version'] == 'task16-recertification-v2'
           assert config['prompt_versions'] == {
@@ -105,8 +107,8 @@ jobs:
           import json
           from pathlib import Path
           r = json.loads(Path('/tmp/task16b-certification/run_report.json').read_text(encoding='utf-8'))
-          assert r['exact_code_sha'] == '8e35645a016770d6db635a698617c03b9a07fc46'
-          assert r['sample_sha256'] == '50026b04d0d5a55a27c8a796f54f35eeea756410835a82c29bbd155013d08304'
+          assert r['exact_code_sha'] == '456174b0ed0497239733ddd2909eea39eda83ecb'
+          assert r['sample_payload_sha256'] == '50026b04d0d5a55a27c8a796f54f35eeea756410835a82c29bbd155013d08304'
           assert r['sample_count'] == 50
           assert r['config_version'] == 'task16-recertification-v2'
           assert r['classifier']['name'] == 'openai_compatible'
@@ -137,6 +139,9 @@ jobs:
         if: always()
         with:
           name: task16b-small-recertification
-          path: /tmp/task16b-certification/
+          path: |
+            /tmp/task16b-certification/
+            /tmp/task16b-workspace/
+            /tmp/task16b-output/
           if-no-files-found: warn
           retention-days: 30
