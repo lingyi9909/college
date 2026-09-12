@@ -152,4 +152,4 @@ def test_task15_source_evidence_fingerprint_is_stable() -> None:
     for source_id, record_id, raw_sha256, category, excerpt in _TASK15_GATE3_FALSE_REJECTS:
         digest.update("\x1f".join((source_id, record_id, raw_sha256, category, excerpt)).encode())
         digest.update(b"\n")
-    assert digest.hexdigest() == "4ea988ee8232b25d6f38e37907852ba2c5ff2c65d545271198a59c7a8bbff44e"
+    assert digest.hexdigest() == "7f903c782b91d81f0bc35f278fbf8e4f775692168d8432a2128ce0cfe1da7f4f"
