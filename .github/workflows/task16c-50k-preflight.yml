@@ -1,0 +1,66 @@
+name: Task16C 50K Sample Preflight
+
+on:
+  push:
+    branches: [ci/task16c-50k-preflight-exec3]
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Guard accepted Task16B baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "05b27ee97bb528f0cb4bd0af8e5746a3424a0414" || true
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('artifacts/task16/re-certification/run_report.json')
+          r = json.loads(p.read_text(encoding='utf-8'))
+          assert r['status'] == 'CANDIDATE_READY_FOR_EXPLICIT_REVIEW'
+          assert r['manual_audit']['false_accept'] == 0
+          assert r['manual_audit']['status'] == 'COMPLETE_50_OF_50'
+          assert r['exact_code_sha'] == '456174b0ed0497239733ddd2909eea39eda83ecb'
+          print('TASK16B_ACCEPTED_BASELINE_EVIDENCE=PASS')
+          PY
+      - name: Build deterministic 50K source sample
+        run: python ci/task16c_prepare_50k.py
+      - name: Validate sample artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('/tmp/task16c-50k-preflight')
+          manifest = json.loads((root/'sample_manifest.json').read_text(encoding='utf-8'))
+          payload = (root/'sample.jsonl').read_bytes()
+          assert manifest['total'] == 50000
+          assert len(manifest['record_ids']) == 50000
+          assert len(manifest['raw_sha256']) == 50000
+          assert hashlib.sha256(payload).hexdigest() == manifest['sample_payload_sha256']
+          assert manifest['strata']['stackmathqa'] == {
+              'math': 20000,
+              'mathoverflow': 5000,
+              'statistics': 10000,
+              'physics': 10000,
+          }
+          assert manifest['strata']['openstax'] == 5000
+          print('TASK16C_50K_SAMPLE_GUARD=PASS')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: task16c-50k-preflight
+          path: /tmp/task16c-50k-preflight/
+          retention-days: 30
