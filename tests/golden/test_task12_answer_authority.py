@@ -76,8 +76,11 @@ def _run(gate: object, candidate: NormalizedQA) -> GateResultEvidence:
 
 
 def _analysis_authority_refs(candidate: NormalizedQA) -> tuple[str, ...]:
+    extraction = extract_source_answer(candidate)
+    assert extraction.final_answer is not None
     return (
         f"question:0-{len(candidate.question)}",
+        f"answer:0-{len(extraction.final_answer)}",
         f"analysis:0-{len(candidate.analysis)}",
     )
 
