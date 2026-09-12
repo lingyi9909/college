@@ -1,0 +1,27 @@
+name: Task16A1 Blockers GREEN
+
+on:
+  push:
+    branches:
+      - verification/task16a1-blockers-green
+
+permissions:
+  contents: read
+
+jobs:
+  green-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3d7961b71c346b4025c70af6983af3c7e4781a71
+      - name: Exact candidate guard
+        run: test "$(git rev-parse HEAD)" = "3d7961b71c346b4025c70af6983af3c7e4781a71"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Task16A1 focused GREEN regressions
+        run: pytest tests/unit/quality/test_task16_gate2_conflict.py -q
+      - name: Existing classification and Gold regression
+        run: pytest tests/unit/quality/test_classify.py tests/e2e/test_gold_regression.py -q
