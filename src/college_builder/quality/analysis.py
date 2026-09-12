@@ -376,23 +376,14 @@ def _has_analysis_evidence(decision: ModelDecision, analysis: str) -> bool:
         end = int(match.group("end"))
         if not 0 <= start < end <= len(analysis):
             continue
-        if _has_substantive_analysis_content(
-            analysis[start:end],
-            covers_full_analysis=start == 0 and end == len(analysis),
-        ):
+        if _has_substantive_analysis_content(analysis[start:end]):
             return True
     return False
 
 
-def _has_substantive_analysis_content(
-    text: str,
-    *,
-    covers_full_analysis: bool,
-) -> bool:
+def _has_substantive_analysis_content(text: str) -> bool:
     """Accept only deterministically identifiable reasoning evidence spans."""
 
     if not any(character.isalnum() for character in text):
         return False
-    if covers_full_analysis:
-        return True
     return _REASONING_SIGNAL_RE.search(text) is not None
