@@ -1,0 +1,142 @@
+{
+  "acceptance_gate": {
+    "all_four_limitation_classes_covered": true,
+    "at_least_one_genuine_full_path_export": true,
+    "false_accept_zero": true,
+    "measurable_false_reject_reduction": true,
+    "no_generated_or_repaired_formal_content_observed": true
+  },
+  "certification": "Task16B small real-model re-certification",
+  "config": {
+    "classifier": {
+      "max_attempts": 3,
+      "model": "deepseek-flash",
+      "name": "openai_compatible",
+      "retry_backoff_seconds": 1.0,
+      "timeout_seconds": 60.0
+    },
+    "prompt_sha256": {
+      "analysis_classify": "8ca848d87de8a6ef945a2ebcbde459c718d7a1020906941d93cea2faa457be8d",
+      "correctness_verify": "289fdf2e5eb8287e71fb63fe774ab95ec8260639c267be0eba0d2107f4c196b7",
+      "problem_classify": "e80dc9752697918c0d18b7180e564199edc9ff4c95de8040eff7a2a28392c3c6",
+      "qa_alignment": "0989884fb0184fa44735b51a981d2c61f177e045f8c0b8157f0993d61612ea27",
+      "university_classify": "f83951688287baeb2240058d2fb471eac5e092f644dd99ec7b7951d656553bd1"
+    },
+    "prompt_versions": {
+      "analysis_classify": "v3",
+      "correctness_verify": "v2",
+      "problem_classify": "v1",
+      "qa_alignment": "v2",
+      "university_classify": "v1"
+    },
+    "sha256": "373eeb33423f1375eb805fee44257a331d7f9f729e1366436544bcdae62325a6",
+    "thresholds": {
+      "analysis": 0.98,
+      "answer_extract": 0.995,
+      "problem": 0.98,
+      "qa_alignment": 0.995,
+      "university": 0.98
+    },
+    "verifier": {
+      "max_attempts": 3,
+      "model": "deepseek-v4-pro",
+      "name": "openai_compatible",
+      "retry_backoff_seconds": 1.0,
+      "timeout_seconds": 90.0
+    },
+    "version": "task16-recertification-v2"
+  },
+  "coverage_counts": {
+    "gate2_classification_threshold_evidence": 22,
+    "gate2_compatible_positive_conflict": 4,
+    "gate3_source_grounded_answer_extraction": 16,
+    "gate4_analysis_evidence_span_protocol": 1,
+    "gate5_correctness_evidence_span_protocol": 3,
+    "precision_control": 7
+  },
+  "exact_code_sha": "456174b0ed0497239733ddd2909eea39eda83ecb",
+  "fresh_verification": {
+    "full_pytest": "547 passed",
+    "mypy": "PASS (33 source files)",
+    "ruff": "PASS",
+    "task16_focused_pytest": "59 passed"
+  },
+  "full_path_accepted_record": {
+    "answer_source_span": "analysis:289:337",
+    "correctness_pass": true,
+    "exact_19_field_export": true,
+    "gate5_pass": true,
+    "raw_sha256": "20ed8b4946ee934f343db9af35bd02268f7025e69aaee15e6fed3011c403833a",
+    "source_id": "physics:540721:0",
+    "task15_audit_index": 60
+  },
+  "github_actions": {
+    "artifact_id": 10301257383,
+    "artifact_sha256": "353928556b46bd3cd755e70c3d6f89f9e845d1c5595a33ca10be521afbc24218",
+    "job_id": 103579763914,
+    "run_id": 34703681938
+  },
+  "manual_audit": {
+    "correct_accept": 1,
+    "correct_reject": 7,
+    "false_accept": 0,
+    "false_reject": 42,
+    "known_false_reject_after": 42,
+    "known_false_reject_before": 43,
+    "status": "COMPLETE_50_OF_50"
+  },
+  "pipeline": {
+    "accepted_count": 1,
+    "cache_hits": 0,
+    "cache_misses": 163,
+    "estimated_cost_usd": null,
+    "estimated_cost_usd_available": false,
+    "exact_19_field_export_valid": true,
+    "funnel": {
+      "after_dedup": 4,
+      "alignment_pass": 2,
+      "analysis_valid": 4,
+      "answer_valid": 5,
+      "final_accepted": 1,
+      "normalized": 50,
+      "problem": 9,
+      "raw": 50,
+      "stem": 46,
+      "university": 44
+    },
+    "provider_call_counts": {
+      "gate_1_university_stem": 82,
+      "gate_2_problem": 70,
+      "gate_4_original_analysis": 5,
+      "gate_5_qa_alignment": 4,
+      "independent_correctness_verification": 2
+    },
+    "provider_errors": 0,
+    "provider_latency_seconds": 2789.5046882760007,
+    "questions_jsonl_sha256": "a8832c7141baf9eff8d9e642c7e38db5041ed49d6bbc108e7f728f2f169abd52",
+    "reject_reason_counts": {
+      "ANALYSIS_UNCERTAIN": 1,
+      "ANSWER_NOT_EXTRACTABLE": 4,
+      "CORRECTNESS_EVIDENCE_INVALID": 1,
+      "NON_STEM": 1,
+      "NOT_UNIVERSITY_LEVEL": 1,
+      "PROBLEM_TYPE_UNCERTAIN": 35,
+      "QA_ALIGNMENT_EVIDENCE_INVALID": 2,
+      "UNIVERSITY_LEVEL_UNCERTAIN": 4
+    },
+    "rejected_count": 49,
+    "run_id": "run-4595aa5faafe6dcfe431d0f52ef70245aea3d3eeb92b1f9fe1ec994034d5dfc7",
+    "tokens": null,
+    "tokens_available": false
+  },
+  "production_scale_claim": false,
+  "review_note": "Safety gate passed, but recall recovery is minimal: 42/43 known false rejects remain; 33 of the 42 remaining false rejects end at PROBLEM_TYPE_UNCERTAIN.",
+  "sample": {
+    "count": 50,
+    "frozen_before_model_calls": true,
+    "payload_sha256": "50026b04d0d5a55a27c8a796f54f35eeea756410835a82c29bbd155013d08304",
+    "precision_controls": 7,
+    "task15_known_false_rejects": 43
+  },
+  "status": "CANDIDATE_READY_FOR_EXPLICIT_REVIEW"
+}
