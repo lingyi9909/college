@@ -364,6 +364,14 @@ def _has_analysis_evidence(decision: ModelDecision, analysis: str) -> bool:
             continue
         start = int(match.group("start"))
         end = int(match.group("end"))
-        if 0 <= start < end <= len(analysis) and analysis[start:end].strip():
+        if not 0 <= start < end <= len(analysis):
+            continue
+        if _has_substantive_analysis_content(analysis[start:end]):
             return True
     return False
+
+
+def _has_substantive_analysis_content(text: str) -> bool:
+    """Reject empty or punctuation-only evidence without repairing model offsets."""
+
+    return any(character.isalnum() for character in text)
