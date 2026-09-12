@@ -1,0 +1,37 @@
+name: Task16A2 RED
+
+on:
+  push:
+    branches:
+      - feature/task16-recall-hardening
+    paths:
+      - tests/unit/quality/test_task16_answer_recall.py
+      - .github/workflows/task16a2-red.yml
+
+jobs:
+  red:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Confirm Task16A2 source-answer recall regressions are RED
+        shell: bash
+        run: |
+          set +e
+          pytest tests/unit/quality/test_task16_answer_recall.py::test_gate3_extracts_explicit_terminal_source_conclusion -q
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo 'Expected Task16A.2 terminal source-answer regressions to fail before implementation.'
+            exit 1
+          fi
+          echo 'TASK16_A2_SOURCE_ANSWER_RECALL_RED=PASS'
+      - name: Confirm anti-generation guards remain GREEN
+        run: |
+          pytest \
+            tests/unit/quality/test_task16_answer_recall.py::test_gate3_does_not_derive_answer_when_terminal_source_text_is_absent \
+            tests/unit/quality/test_task16_answer_recall.py::test_gate3_does_not_treat_trailing_explanatory_sentence_as_answer \
+            -q
