@@ -1,0 +1,33 @@
+name: Task16A2 Final Verify
+
+on:
+  push:
+    branches:
+      - ci/task16a2-final-verify
+    paths:
+      - .github/workflows/task16a2-final-verify.yml
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 74ea28288e87770a2b68abaf16a43f3f6a05b523
+          fetch-depth: 1
+      - name: Exact HEAD guard
+        run: test "$(git rev-parse HEAD)" = "74ea28288e87770a2b68abaf16a43f3f6a05b523"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Task16A2 regression
+        run: pytest tests/unit/quality/test_task16_answer_recall.py -q
+      - name: Existing answer and Gold regression
+        run: pytest tests/unit/quality/test_answer.py tests/e2e/test_gold_regression.py -q
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
