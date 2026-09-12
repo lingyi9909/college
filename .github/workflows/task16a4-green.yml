@@ -1,0 +1,31 @@
+name: Task16A4 GREEN
+
+on:
+  push:
+    branches:
+      - ci/task16a4-green
+    paths:
+      - .github/workflows/task16a4-green.yml
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 17b590fe5800b8d41ebb6db9e7280b6adc7b7baa
+          fetch-depth: 1
+      - name: Exact HEAD guard
+        run: test "$(git rev-parse HEAD)" = "17b590fe5800b8d41ebb6db9e7280b6adc7b7baa"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Task16A4 focused regressions
+        run: pytest tests/unit/quality/test_task16a4_downstream_span_protocol.py tests/unit/quality/test_verify.py tests/e2e/test_task15_provider_prompt_protocol.py tests/e2e/test_gold_regression.py -q
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
