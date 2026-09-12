@@ -22,7 +22,12 @@ def main() -> None:
 
     parent_manifest_data = json.loads(parent_manifest.read_text(encoding="utf-8"))
     assert parent_manifest_data["sample_sha256"] == PARENT_SAMPLE_SHA
-    assert _sha256(parent.read_bytes()) == PARENT_SAMPLE_SHA
+    parent_ids = parent_manifest_data["sampled_record_ids"]
+    parent_hashes = parent_manifest_data["sampled_raw_sha256"]
+    assert parent_manifest_data["total"] == 100
+    assert len(parent_ids) == len(parent_hashes) == 100
+    parent_identity = dict(zip(parent_ids, parent_hashes, strict=True))
+    assert len(parent_identity) == 100
 
     frozen = json.loads(frozen_manifest_path.read_text(encoding="utf-8"))
     assert frozen["selection_frozen_before_model_calls"] is True
@@ -37,9 +42,13 @@ def main() -> None:
             continue
         row = json.loads(line)
         record_id = row["record_id"]
+        raw_sha = row["raw_sha256"]
         assert isinstance(record_id, str)
+        assert isinstance(raw_sha, str)
+        assert parent_identity.get(record_id) == raw_sha
         source_lines[record_id] = (line, row)
     assert len(source_lines) == 100
+    assert set(source_lines) == set(parent_identity)
 
     selected_lines: list[str] = []
     seen: set[str] = set()
@@ -68,8 +77,8 @@ def main() -> None:
     (evidence_dir / "sample_identity.json").write_text(
         json.dumps(
             {
-                "parent_sample_sha256": PARENT_SAMPLE_SHA,
-                "sample_sha256": FROZEN_SAMPLE_SHA,
+                "parent_logical_sample_sha256": PARENT_SAMPLE_SHA,
+                "sample_payload_sha256": FROZEN_SAMPLE_SHA,
                 "record_count": 50,
                 "record_ids": [row["record_id"] for row in frozen["records"]],
                 "raw_sha256": [row["raw_sha256"] for row in frozen["records"]],
@@ -82,7 +91,7 @@ def main() -> None:
         encoding="utf-8",
     )
     print("TASK16B_FROZEN_SAMPLE_GUARD=PASS")
-    print(f"TASK16B_SAMPLE_SHA256={FROZEN_SAMPLE_SHA}")
+    print(f"TASK16B_SAMPLE_PAYLOAD_SHA256={FROZEN_SAMPLE_SHA}")
 
 
 if __name__ == "__main__":
