@@ -41,7 +41,7 @@ class GoldRegressionProvider:
             return ModelDecision(
                 label=label,
                 score=0.999,
-                evidence_references=("question:gold",),
+                evidence_references=(f"question:0-{len(question)}",),
                 reason_code="GOLD_PROBLEM",
             )
         if request.task == "gate_4_original_analysis":
