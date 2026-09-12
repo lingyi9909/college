@@ -31,6 +31,16 @@ _ANSWER_ONLY_RE = re.compile(
     r"因此|所以|故)\s*(?P<answer>.+?)\s*$"
 )
 _SAME_AS_ABOVE = frozenset({"同上", "same as above", "as above"})
+_REASONING_SIGNAL_RE = re.compile(
+    r"(?ix)(?:"
+    r"\b(?:because|since|therefore|thus|hence|then|so|implies?|follows?|"
+    r"assume|assuming|suppose|let|subtract|divide|multiply|add|differentiate|"
+    r"integrate|derive|prove|proof|obtain|obtains|gives?|yields?)\b|"
+    r"(?:=|<=|>=|!=|<|>|≤|≥|≠|≈|→|⇒|⇔|∈|∉|⊂|⊆)|"
+    r"\\(?:leq?|geq?|neq|to|rightarrow|implies|iff)\b|"
+    r"(?:因为|所以|因此|故|设|假设|则|可得|得到|推出|从而|证明)"
+    r")"
+)
 
 
 class AnalysisGate:
@@ -366,12 +376,23 @@ def _has_analysis_evidence(decision: ModelDecision, analysis: str) -> bool:
         end = int(match.group("end"))
         if not 0 <= start < end <= len(analysis):
             continue
-        if _has_substantive_analysis_content(analysis[start:end]):
+        if _has_substantive_analysis_content(
+            analysis[start:end],
+            covers_full_analysis=start == 0 and end == len(analysis),
+        ):
             return True
     return False
 
 
-def _has_substantive_analysis_content(text: str) -> bool:
-    """Reject empty or punctuation-only evidence without repairing model offsets."""
+def _has_substantive_analysis_content(
+    text: str,
+    *,
+    covers_full_analysis: bool,
+) -> bool:
+    """Accept only deterministically identifiable reasoning evidence spans."""
 
-    return any(character.isalnum() for character in text)
+    if not any(character.isalnum() for character in text):
+        return False
+    if covers_full_analysis:
+        return True
+    return _REASONING_SIGNAL_RE.search(text) is not None
