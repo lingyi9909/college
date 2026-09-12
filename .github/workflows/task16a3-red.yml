@@ -13,13 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 05768705f64c115772c039fa4dfdec555364f073
+          ref: 63ba59555677ff24079685ee9ef423ca819f61c3
           fetch-depth: 1
       - name: Exact HEAD guard
-        run: test "$(git rev-parse HEAD)" = "05768705f64c115772c039fa4dfdec555364f073"
+        run: test "$(git rev-parse HEAD)" = "63ba59555677ff24079685ee9ef423ca819f61c3"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m pip install -e '.[dev]'
-      - name: Task16A3 focused RED
-        run: pytest tests/unit/quality/test_analysis.py tests/e2e/test_task15_provider_prompt_protocol.py -q
+      - name: Task16A3 relevance RED
+        run: pytest tests/unit/quality/test_task16a3_analysis_evidence_relevance.py -q
