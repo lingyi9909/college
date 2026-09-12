@@ -1,5 +1,5 @@
 pipeline_version: university_dataset_builder_0.1.0
-config_version: task16-recertification-v1
+config_version: task16-recertification-v2
 profile: university_stem_v1
 thresholds:
   university: 0.98
@@ -24,8 +24,8 @@ prompt_versions:
   university_classify: v1
   problem_classify: v1
   analysis_classify: v3
-  qa_alignment: v1
-  correctness_verify: v1
+  qa_alignment: v2
+  correctness_verify: v2
 concurrency:
   acquisition: 8
   normalization: 16
