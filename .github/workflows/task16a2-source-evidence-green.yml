@@ -1,0 +1,30 @@
+name: Task16A2 Source Evidence GREEN
+
+on:
+  push:
+    branches:
+      - feature/task16-recall-hardening
+    paths:
+      - src/college_builder/quality/answer.py
+      - tests/unit/quality/test_task16_task15_answer_evidence.py
+      - .github/workflows/task16a2-source-evidence-green.yml
+
+jobs:
+  green:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Task15 real Gate3 evidence regressions
+        run: pytest tests/unit/quality/test_task16_task15_answer_evidence.py -q
+      - name: Task16A2 existing regressions
+        run: pytest tests/unit/quality/test_task16_answer_recall.py tests/unit/quality/test_answer.py tests/e2e/test_gold_regression.py -q
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
