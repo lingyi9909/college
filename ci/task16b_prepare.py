@@ -6,10 +6,28 @@ from pathlib import Path
 
 PARENT_SAMPLE_SHA = "ae513933791c2ac27d3916a4149193c2477e00ce993c59b597b27ad02101ae8e"
 FROZEN_SAMPLE_SHA = "50026b04d0d5a55a27c8a796f54f35eeea756410835a82c29bbd155013d08304"
+FIELDS = (
+    "task15_audit_index",
+    "source_id",
+    "record_id",
+    "raw_sha256",
+    "baseline_manual_verdict",
+    "baseline_task15_reject_reason",
+)
 
 
 def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _records(frozen: dict[str, object]) -> list[dict[str, object]]:
+    assert frozen["schema_version"] == "task16-small-recert-sample-v2"
+    assert frozen["record_tuple_fields"] == list(FIELDS)
+    raw_records = frozen["records"]
+    assert isinstance(raw_records, list) and len(raw_records) == 50
+    records = [dict(zip(FIELDS, row, strict=True)) for row in raw_records]
+    assert len({row["task15_audit_index"] for row in records}) == 50
+    return records
 
 
 def main() -> None:
@@ -32,9 +50,10 @@ def main() -> None:
     frozen = json.loads(frozen_manifest_path.read_text(encoding="utf-8"))
     assert frozen["selection_frozen_before_model_calls"] is True
     assert frozen["sample"]["total"] == 50
-    assert frozen["sample"]["sample_sha256"] == FROZEN_SAMPLE_SHA
+    assert frozen["sample"]["sample_payload_sha256"] == FROZEN_SAMPLE_SHA
     assert frozen["selection_policy"]["false_reject_count"] == 43
     assert frozen["selection_policy"]["precision_control_count"] == 7
+    records = _records(frozen)
 
     source_lines: dict[str, tuple[str, dict[str, object]]] = {}
     for line in parent.read_text(encoding="utf-8").splitlines():
@@ -52,7 +71,7 @@ def main() -> None:
 
     selected_lines: list[str] = []
     seen: set[str] = set()
-    for expected in frozen["records"]:
+    for expected in records:
         record_id = expected["record_id"]
         assert isinstance(record_id, str)
         assert record_id not in seen
@@ -80,8 +99,8 @@ def main() -> None:
                 "parent_logical_sample_sha256": PARENT_SAMPLE_SHA,
                 "sample_payload_sha256": FROZEN_SAMPLE_SHA,
                 "record_count": 50,
-                "record_ids": [row["record_id"] for row in frozen["records"]],
-                "raw_sha256": [row["raw_sha256"] for row in frozen["records"]],
+                "record_ids": [row["record_id"] for row in records],
+                "raw_sha256": [row["raw_sha256"] for row in records],
             },
             ensure_ascii=False,
             indent=2,
