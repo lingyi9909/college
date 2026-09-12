@@ -13,10 +13,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 809012fec33a12d26d45a2cdd58a9a34c5598535
+          ref: 773051a5799c835d994cfc939fda8352f0d9f6b8
           fetch-depth: 1
       - name: Exact HEAD guard
-        run: test "$(git rev-parse HEAD)" = "809012fec33a12d26d45a2cdd58a9a34c5598535"
+        run: test "$(git rev-parse HEAD)" = "773051a5799c835d994cfc939fda8352f0d9f6b8"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
