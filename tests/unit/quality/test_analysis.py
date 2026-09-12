@@ -458,9 +458,13 @@ def test_task15_real_gate4_textual_span_reference_remains_fail_closed() -> None:
 
 
 def test_gate4_valid_half_open_boundary_span_passes() -> None:
-    analysis = "....x"
+    analysis = "Since x = 4, substituting it satisfies the equation."
     gate, _, _ = _gate(
-        _decision("PROOF", 0.99, evidence_references=("analysis:0-5",))
+        _decision(
+            "PROOF",
+            0.99,
+            evidence_references=(f"analysis:0-{len(analysis)}",),
+        )
     )
 
     evidence = _run(gate, _candidate(analysis=analysis))
