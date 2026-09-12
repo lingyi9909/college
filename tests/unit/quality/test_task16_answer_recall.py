@@ -61,6 +61,22 @@ def test_gate3_extracts_explicit_terminal_source_conclusion(
     )
 
 
+@pytest.mark.parametrize("expected", ["42", "3.5", "-7", "1/2"])
+def test_gate3_extracts_standalone_terminal_numeric_source_answer(expected: str) -> None:
+    analysis = f"The source computation ends with the following result.\n{expected}"
+
+    extraction = extract_source_answer(_candidate(analysis))
+
+    assert extraction.final_answer == expected
+    assert extraction.source_field == "analysis"
+    assert extraction.start_offset is not None
+    assert extraction.end_offset is not None
+    assert analysis[extraction.start_offset : extraction.end_offset] == expected
+    assert extraction.source_span == (
+        f"analysis:{extraction.start_offset}:{extraction.end_offset}"
+    )
+
+
 def test_gate3_does_not_derive_answer_when_terminal_source_text_is_absent() -> None:
     analysis = "Solving 2x + 3 = 11 requires isolating x by ordinary algebra."
 
