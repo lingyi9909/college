@@ -1,0 +1,25 @@
+name: Task16A1 Ruff Import Order
+
+on:
+  push:
+    branches:
+      - verification/task16a1-ruff-order
+
+permissions:
+  contents: read
+
+jobs:
+  show-ruff-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e8e39efe9ec97183da7cd11e37cbec1d059f50cc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ruff==0.16.7
+      - name: Show exact Ruff import fix
+        run: |
+          ruff check tests/unit/quality/test_task16_gate2_conflict.py --fix || true
+          git diff -- tests/unit/quality/test_task16_gate2_conflict.py
