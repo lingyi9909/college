@@ -13,18 +13,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 74ea28288e87770a2b68abaf16a43f3f6a05b523
+          ref: 809012fec33a12d26d45a2cdd58a9a34c5598535
           fetch-depth: 1
       - name: Exact HEAD guard
-        run: test "$(git rev-parse HEAD)" = "74ea28288e87770a2b68abaf16a43f3f6a05b523"
+        run: test "$(git rev-parse HEAD)" = "809012fec33a12d26d45a2cdd58a9a34c5598535"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m pip install -e '.[dev]'
-      - name: Task16A2 regression
-        run: pytest tests/unit/quality/test_task16_answer_recall.py -q
-      - name: Existing answer and Gold regression
-        run: pytest tests/unit/quality/test_answer.py tests/e2e/test_gold_regression.py -q
+      - name: Task15 real Gate3 evidence regressions
+        run: pytest tests/unit/quality/test_task16_task15_answer_evidence.py -q
+      - name: Task16A2 existing regressions
+        run: pytest tests/unit/quality/test_task16_answer_recall.py tests/unit/quality/test_answer.py tests/e2e/test_gold_regression.py -q
       - name: Full pytest
         run: pytest -q
       - name: Ruff
