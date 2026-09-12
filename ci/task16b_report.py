@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-CODE_SHA = "8e35645a016770d6db635a698617c03b9a07fc46"
+CODE_SHA = "456174b0ed0497239733ddd2909eea39eda83ecb"
 FROZEN_SAMPLE_SHA = "50026b04d0d5a55a27c8a796f54f35eeea756410835a82c29bbd155013d08304"
 CONFIG_PATH = Path("config/task16-recertification.yaml")
 CERT_DIR = Path("/tmp/task16b-certification")
@@ -16,6 +16,14 @@ WORKSPACE = Path("/tmp/task16b-workspace")
 OUTPUT = Path("/tmp/task16b-output")
 SAMPLE = Path("/tmp/task16b-sample.jsonl")
 MANIFEST = Path("artifacts/task16/re-certification/sample_manifest.json")
+FIELDS = (
+    "task15_audit_index",
+    "source_id",
+    "record_id",
+    "raw_sha256",
+    "baseline_manual_verdict",
+    "baseline_task15_reject_reason",
+)
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -30,17 +38,25 @@ def _json(path: Path) -> object:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _load_raw() -> dict[str, dict[str, object]]:
-    rows: dict[str, dict[str, object]] = {}
-    for line in SAMPLE.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
-        record_id = row["record_id"]
-        assert isinstance(record_id, str)
-        rows[record_id] = row
-    assert len(rows) == 50
-    return rows
+def _manifest_records(frozen: dict[str, object]) -> list[dict[str, object]]:
+    assert frozen["schema_version"] == "task16-small-recert-sample-v2"
+    assert frozen["record_tuple_fields"] == list(FIELDS)
+    raw_records = frozen["records"]
+    assert isinstance(raw_records, list) and len(raw_records) == 50
+    records = [dict(zip(FIELDS, row, strict=True)) for row in raw_records]
+    coverage = frozen["coverage"]
+    assert isinstance(coverage, dict)
+    coverage_by_index: dict[int, list[str]] = {}
+    for name, indices in coverage.items():
+        assert isinstance(name, str) and isinstance(indices, list)
+        for index in indices:
+            assert isinstance(index, int)
+            coverage_by_index.setdefault(index, []).append(name)
+    for row in records:
+        index = row["task15_audit_index"]
+        assert isinstance(index, int)
+        row["coverage"] = sorted(coverage_by_index.get(index, []))
+    return records
 
 
 def _load_audits(run_dir: Path) -> dict[str, dict[str, object]]:
@@ -109,10 +125,11 @@ def main() -> None:
     assert _sha256_file(SAMPLE) == FROZEN_SAMPLE_SHA
     frozen = _json(MANIFEST)
     assert isinstance(frozen, dict)
-    records = frozen["records"]
-    assert isinstance(records, list) and len(records) == 50
+    assert frozen["sample"]["sample_payload_sha256"] == FROZEN_SAMPLE_SHA
+    records = _manifest_records(frozen)
     frozen_by_id = {row["record_id"]: row for row in records}
     frozen_by_source = {row["source_id"]: row for row in records}
+    assert len(frozen_by_id) == len(frozen_by_source) == 50
 
     run_dirs = [path for path in (WORKSPACE / "runs").iterdir() if path.is_dir()]
     assert len(run_dirs) == 1
@@ -141,6 +158,7 @@ def main() -> None:
     new_reasons: Counter[str] = Counter()
     for expected in records:
         record_id = expected["record_id"]
+        assert isinstance(record_id, str)
         audit = audits[record_id]
         accepted = bool(audit.get("accepted", False))
         reject_reason = audit.get("reject_reason")
@@ -178,14 +196,19 @@ def main() -> None:
         )
 
     accepted_bindings = _accepted_source_bindings(exports, frozen_by_source)
+    coverage = frozen["coverage"]
+    assert isinstance(coverage, dict)
+    coverage_counts = {name: len(indices) for name, indices in coverage.items()}
+    questions = OUTPUT / "questions.jsonl"
+    provider_usage = run_dir / "provider_usage.json"
     report = {
         "certification": "Task16B small real-model re-certification",
         "exact_code_sha": CODE_SHA,
-        "sample_sha256": FROZEN_SAMPLE_SHA,
+        "sample_payload_sha256": FROZEN_SAMPLE_SHA,
         "sample_count": 50,
         "parent_task15": frozen["parent_task15"],
         "selection_policy": frozen["selection_policy"],
-        "coverage_counts": frozen["coverage_counts"],
+        "coverage_counts": coverage_counts,
         "config_version": config["config_version"],
         "config_sha256": _sha256_file(CONFIG_PATH),
         "prompt_versions": prompt_versions,
@@ -216,7 +239,7 @@ def main() -> None:
         },
         "accepted_source_bindings": accepted_bindings,
         "exact_19_field_export_valid": len(exports) == pipeline_report["accepted_count"],
-        "questions_jsonl_sha256": _sha256_file(OUTPUT / "questions.jsonl"),
+        "questions_jsonl_sha256": _sha256_file(questions) if questions.is_file() else None,
         "records": outcomes,
         "manual_audit_status": "PENDING_POST_RUN_REVIEW",
         "acceptance_gate_status": "PENDING_MANUAL_AUDIT",
@@ -227,14 +250,18 @@ def main() -> None:
         encoding="utf-8",
     )
     shutil.copy2(SAMPLE, CERT_DIR / "sample.jsonl")
-    shutil.copy2(OUTPUT / "questions.jsonl", CERT_DIR / "questions.jsonl")
-    shutil.copy2(OUTPUT / "pilot_report.json", CERT_DIR / "pilot_report.json")
+    if questions.is_file():
+        shutil.copy2(questions, CERT_DIR / "questions.jsonl")
+    pilot_report = OUTPUT / "pilot_report.json"
+    if pilot_report.is_file():
+        shutil.copy2(pilot_report, CERT_DIR / "pilot_report.json")
     shutil.copytree(run_dir / "audits", CERT_DIR / "audits", dirs_exist_ok=True)
     if (run_dir / "rejected").is_dir():
         shutil.copytree(run_dir / "rejected", CERT_DIR / "rejected", dirs_exist_ok=True)
     if (run_dir / "stages").is_dir():
         shutil.copytree(run_dir / "stages", CERT_DIR / "stages", dirs_exist_ok=True)
-    shutil.copy2(run_dir / "provider_usage.json", CERT_DIR / "provider_usage.json")
+    if provider_usage.is_file():
+        shutil.copy2(provider_usage, CERT_DIR / "provider_usage.json")
     print("TASK16B_REPORT_BUILT=PASS")
     print(json.dumps(report["before_after"], sort_keys=True))
     print(json.dumps(report["funnel"], sort_keys=True))
