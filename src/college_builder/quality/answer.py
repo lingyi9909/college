@@ -16,6 +16,9 @@ _CONCLUSION_RE = re.compile(
     r"(?is)(?:therefore|thus|hence|final\s+answer\s*[:：]|answer\s*[:：]|因此|所以|故)\s*"
     r"(?P<answer>[^\n]+?)\s*$"
 )
+_TERMINAL_MATH_RE = re.compile(
+    r"(?s)^(?:\$[^$\n]+\$|\\\([^\n]+\\\)|\\\[[^\n]+\\\]|[+-]?(?:\d+(?:\.\d+)?|\d+\s*/\s*\d+))$"
+)
 _REFERENTIAL_ANSWER_RE = re.compile(
     r"(?is)(?:\b(?:shown|given|stated)\s+above\b|\b(?:see|refer\s+to)\b|"
     r"(?:如上|上述|上面|见上))"
@@ -88,6 +91,8 @@ def extract_source_answer(candidate: NormalizedQA) -> AnswerExtraction:
 
     analysis_text = candidate.analysis
     analysis_span = _conclusion_span(analysis_text)
+    if analysis_span is None:
+        analysis_span = _terminal_answer_span(analysis_text)
     if analysis_span is not None:
         start, end, text = analysis_span
         return _extraction(
@@ -223,6 +228,28 @@ def _conclusion_span(text: str) -> tuple[int, int, str] | None:
         return None
     answer = text[start:end]
     if answer in _PLACEHOLDERS or _REFERENTIAL_ANSWER_RE.search(answer):
+        return None
+    return start, end, answer
+
+
+def _terminal_answer_span(text: str) -> tuple[int, int, str] | None:
+    """Return a literal terminal answer line only when its syntax is unambiguous."""
+
+    end = len(text.rstrip())
+    if end == 0:
+        return None
+    line_start = text.rfind("\n", 0, end) + 1
+    start = line_start
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    if start >= end:
+        return None
+    answer = text[start:end]
+    if answer in _PLACEHOLDERS or _REFERENTIAL_ANSWER_RE.search(answer):
+        return None
+    if _TERMINAL_MATH_RE.fullmatch(answer) is None:
         return None
     return start, end, answer
 
