@@ -1,3 +1,5 @@
+# Frozen Task 15 provenance literals intentionally retain exact identities and excerpts.
+# ruff: noqa: E501
 from __future__ import annotations
 
 import hashlib
