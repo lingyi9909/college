@@ -615,7 +615,7 @@ def _validated_source_references(
     if source_field is None or authority_start is None or authority_end is None:
         return (), False, len(decision.evidence_references)
 
-    required_fields = {"question", "analysis", source_field}
+    required_fields = {"question", "answer", "analysis"}
     covered: set[str] = set()
     authority_covered = False
     validated: list[str] = []
