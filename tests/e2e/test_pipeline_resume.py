@@ -78,9 +78,10 @@ class RuleProvider:
             return _decision("UNIVERSITY_STEM", 0.999, ("question:classification",))
 
         if request.task == "gate_2_problem":
+            evidence = (f"question:0-{len(question)}",)
             if "NONPROBLEM" in question:
-                return _decision("DISCUSSION", 0.999, ("question:problem",))
-            return _decision("CALCULATION", 0.999, ("question:problem",))
+                return _decision("DISCUSSION", 0.999, evidence)
+            return _decision("CALCULATION", 0.999, evidence)
 
         if request.task == "gate_4_original_analysis":
             analysis = str(inputs["analysis"])
