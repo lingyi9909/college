@@ -1,0 +1,705 @@
+{
+  "coverage_counts": {
+    "gate2_classification_threshold_evidence": 22,
+    "gate2_compatible_positive_conflict": 4,
+    "gate3_source_grounded_answer_extraction": 16,
+    "gate4_analysis_evidence_span_protocol": 1,
+    "gate5_correctness_evidence_span_protocol": 3,
+    "precision_control": 7
+  },
+  "parent_task15": {
+    "five_k_sample_sha256": "e9d7b957a092114da35dbb839319a08ab555692a8a06863faf2b1980c2a681c5",
+    "hundred_sample_sha256": "ae513933791c2ac27d3916a4149193c2477e00ce993c59b597b27ad02101ae8e",
+    "production_code_sha": "d3b35964ac92d799405fd88101fa11fd05ff1460",
+    "real100_artifact_id": 10183643305,
+    "real100_artifact_sha256": "7fea5140b50ee96abc08872dd67312b77ab2b6b60811b5746269d824d0c7e8be",
+    "real100_run_id": 34558426996,
+    "source_revision": "git:13239ec8c8078bc8dfb43e1383069eb9be000ff7"
+  },
+  "records": [
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "2044b354536bf45a86b9fe948ad7dc0cc86cfd9c0304daf1f91982659580d505",
+      "record_id": "raw_stackmathqa_d348807150e3f9c068f65e65e49f48839b99aa7a0abf638af47ce73fe0da03b3",
+      "source_id": "math:800029:0",
+      "task15_audit_index": 1
+    },
+    {
+      "baseline_manual_verdict": "REJECT_CONFIRMED",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "precision_control"
+      ],
+      "raw_sha256": "a90a42d2bff29cfcc454f5adf787f7a642d7423367533e49a37427d2f866c1f4",
+      "record_id": "raw_stackmathqa_85c46552681dddc2c70865157260f844e180dd39c43f8cf10cfb20dd6861ad8f",
+      "source_id": "math:3384278:0",
+      "task15_audit_index": 2
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "73cfeeaa55454bef8db46ad0c1d777484f7ebb03752acfd33299159bfe29206e",
+      "record_id": "raw_stackmathqa_f7762046904511bb6ebfaf2e4f125ea85bd73ee35d16f895fd5a0d73fc24bb52",
+      "source_id": "math:4453111:4",
+      "task15_audit_index": 4
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "d04d30b6146b81238dc2786fa0da49457addc24d7c1b0e083c8e657105621fc1",
+      "record_id": "raw_stackmathqa_9a6e85898c29b014a8023a88f71b74047819b9fec8be775f96b76e34550edba7",
+      "source_id": "math:2311173:0",
+      "task15_audit_index": 5
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "6ae84a274ad14b531f2ffa6746c8dd8fe724646d0615e70f2c37151e043b6f9c",
+      "record_id": "raw_stackmathqa_188de82d5808cfbf56de588550007f0d5691d29bfabe740e1464fb10c20e57d9",
+      "source_id": "math:4478385:0",
+      "task15_audit_index": 6
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "02d2103c5cf4cea57a97a6816f43a2bf01fe42a2353fd242f4f8cb15d810decd",
+      "record_id": "raw_stackmathqa_005c00d0678c34313789636524ff500a81d2a2e87e0afff0582992ba2146bc1e",
+      "source_id": "math:2544901:0",
+      "task15_audit_index": 7
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "MODEL_DECISION_CONFLICT",
+      "coverage": [
+        "gate2_compatible_positive_conflict"
+      ],
+      "raw_sha256": "58d66855aa3323bcf34290eaa1afcc7bc0c60a865b1e3796115ae4cbbdbc8ca7",
+      "record_id": "raw_stackmathqa_6eb0b5a9b44043d7e36af57a3d38f6b56f1b6cd877d8f0a4178dbb73497ba773",
+      "source_id": "math:2142021:0",
+      "task15_audit_index": 9
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "17abcd415fb67deb4740b4624a231de65ac1b4daf7b94c22f5860a8ffdfc3bd2",
+      "record_id": "raw_stackmathqa_5a1cca5a575c6300466717e112de92ba495dc41ba43a93c4408520527bd4669e",
+      "source_id": "math:3701703:0",
+      "task15_audit_index": 10
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "3314409225239cc8f9c3e4697188f6f1d16d1388211bc8a9b9656c185d7fd58d",
+      "record_id": "raw_stackmathqa_80e132d37f4123333b957d1970d84f29be2f435694593dd81a3eb1ba4d2ba2cf",
+      "source_id": "math:1484602:0",
+      "task15_audit_index": 12
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "e0337766bebe0ebb3719ad7866ac8b209cfb88936e9528fa58bc78dfef0ffd8c",
+      "record_id": "raw_stackmathqa_83566af0a21583b16e4c1e2c6064c7149ae22ba17cc63f7191480651803befde",
+      "source_id": "math:4338045:0",
+      "task15_audit_index": 13
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "bffbb9aba40579630db63e136abf6a30fd01b967a237360ee435f1fb77354ac8",
+      "record_id": "raw_stackmathqa_29d5fc9abf0666108842087818b628cff368145ad5fdf1ce6f88aaa4df4f6133",
+      "source_id": "math:2521299:0",
+      "task15_audit_index": 14
+    },
+    {
+      "baseline_manual_verdict": "REJECT_CONFIRMED",
+      "baseline_task15_reject_reason": "UNIVERSITY_LEVEL_UNCERTAIN",
+      "coverage": [
+        "precision_control",
+        "gate5_correctness_evidence_span_protocol"
+      ],
+      "raw_sha256": "4deb3f4f77b724cc0da2e6722eba372272ba86e2ff6be089c89bf450375e9406",
+      "record_id": "raw_stackmathqa_acad4b62acbb4a6e4284ac9777d02fe98b6180808a3e923e2ef17a9709c0f5e6",
+      "source_id": "math:868000:1",
+      "task15_audit_index": 15
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "51f92672a03f9aabea3897f90541de238f020f855af298639ee62724cab38258",
+      "record_id": "raw_stackmathqa_112f5e99cb8f60bb4a5dd7c5e41b606aa1ba14c6a614fbbe4801947fd2db7555",
+      "source_id": "math:3331406:0",
+      "task15_audit_index": 16
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "f8714b97c236774f029f94089175f12d7d7994e03832ea4398cb6b46da860574",
+      "record_id": "raw_stackmathqa_a3d71b3f27e4b61ae25533b89cb06eb12a12a4d3e8bcdb1abff688b909c5cfcc",
+      "source_id": "math:1432059:0",
+      "task15_audit_index": 17
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "MODEL_DECISION_CONFLICT",
+      "coverage": [
+        "gate2_compatible_positive_conflict"
+      ],
+      "raw_sha256": "269d28fe5b84625f596398c3e3cf8d9bac8f37bc0edb259b1c1d47ac2f456c70",
+      "record_id": "raw_stackmathqa_1966b9da140a001e50d934129022411d2458f1c1c094740ea1328333a02a2aee",
+      "source_id": "math:3463165:0",
+      "task15_audit_index": 18
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "ab5324a083529f27b48c89b9fe5c2cec91241c3c57d6fca1dc77f771fcfe3a56",
+      "record_id": "raw_stackmathqa_e49fe4da446e0e120b19f48c5c07a3df93a1b64f0037e5f261a8bb1003a91da8",
+      "source_id": "math:2975169:0",
+      "task15_audit_index": 19
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "ab902d81a8715b2ea9f0f754381dcd2ba4a676c972dbe834cd6ecdc0aae4693a",
+      "record_id": "raw_stackmathqa_8f8f5ec4c4d2791e49983fc9044dd4a75fc8f0eea410e1d43d94d770f944da7c",
+      "source_id": "math:4640072:0",
+      "task15_audit_index": 21
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "d147bc27f390e68674d1e7d786537a8d5199bab10deab32125edcb3246ad3378",
+      "record_id": "raw_stackmathqa_7d1eb20028b433e7d189f9cfca136d25cb0889851610497141a3ed70b39c6528",
+      "source_id": "math:2176500:0",
+      "task15_audit_index": 24
+    },
+    {
+      "baseline_manual_verdict": "REJECT_CONFIRMED",
+      "baseline_task15_reject_reason": "MODEL_DECISION_CONFLICT",
+      "coverage": [
+        "precision_control"
+      ],
+      "raw_sha256": "85b6cbd7c4dd5a2aaec9c66c97c32a9a3a92fc83a83b07c219781b7026c0594a",
+      "record_id": "raw_stackmathqa_2c573c4f4f5c451c221fc928471901ca88dccf26d404c9ae75c6e718bf8939d8",
+      "source_id": "math:3108521:0",
+      "task15_audit_index": 25
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "fbddef7171e8654c2e5e1b5c5787057bfa2aa83ad725c807e5de4f9e987f1023",
+      "record_id": "raw_stackmathqa_9bb62eed4c7e25bccb0671448a48742ffabfbb966518a966213386b38af259dc",
+      "source_id": "math:1856187:0",
+      "task15_audit_index": 27
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction",
+        "gate5_correctness_evidence_span_protocol"
+      ],
+      "raw_sha256": "e32e233508cb23c63e5eee7024e7ea15eaa6a667cf636cd2826108205868c1ea",
+      "record_id": "raw_stackmathqa_36383322c62efa98ac513621c69ff25f05bdb72a2c74dadc9870c33f8b9c030d",
+      "source_id": "math:3969220:0",
+      "task15_audit_index": 28
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "0f1f82fe1f0af223b7f10b79b848cdeeeb519dd2003f258ed9d38e403e2eb6f7",
+      "record_id": "raw_stackmathqa_b790d91ada9c89b34d7556fcb3ee75498de47a8753f2308812901461b05e201c",
+      "source_id": "math:277083:2",
+      "task15_audit_index": 29
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "46ef59d438658862fa67d5e2dcef4251c2395fe3d4241a53d8a40fffd819f1df",
+      "record_id": "raw_stackmathqa_8039162d0049b08109d9ab95dac88441e2b55acc6762c6a1d0fe0484452b1c01",
+      "source_id": "math:193977:0",
+      "task15_audit_index": 31
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "6dc89bbf6f14313e45711d10fb3c303a7674e620191fe950dab9dc5385d7ee29",
+      "record_id": "raw_stackmathqa_08336acc6ce6413fb6dbc5392438cc7907e440384a062138ebc11c2c4afeac38",
+      "source_id": "math:4094740:0",
+      "task15_audit_index": 34
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANALYSIS_UNCERTAIN",
+      "coverage": [
+        "gate4_analysis_evidence_span_protocol",
+        "gate5_correctness_evidence_span_protocol"
+      ],
+      "raw_sha256": "2d394cda5cdc5a0cd3d014c047df0840acc9ed7873c05d424bff79d47ac1d16a",
+      "record_id": "raw_stackmathqa_02710c86aaba8c5134a75a6a9932a022057f16b6da36955041ca4e053f3912d7",
+      "source_id": "math:2621527:0",
+      "task15_audit_index": 35
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "a4b4833718211de8400a564d57a65ec081222b8c837254a85d9977a54d78a91b",
+      "record_id": "raw_stackmathqa_974d85300e40781760285d693308f49f16e691f27d830b4085c5049b51783951",
+      "source_id": "math:939151:1",
+      "task15_audit_index": 38
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "473f080e98229b4be650abcad0b4a004044d5c451d42a0258e73a46643b4d943",
+      "record_id": "raw_stackmathqa_2eb24bfc4475f0e84ea748b53afe235502d9f6c9b396c650e8244ff0781d9bf2",
+      "source_id": "physics:160816:1",
+      "task15_audit_index": 41
+    },
+    {
+      "baseline_manual_verdict": "REJECT_CONFIRMED",
+      "baseline_task15_reject_reason": "UNIVERSITY_LEVEL_UNCERTAIN",
+      "coverage": [
+        "precision_control"
+      ],
+      "raw_sha256": "8a92818ca0bff7f6cefe4f0b745c3d3137c8562125ba25127bc165941e46f932",
+      "record_id": "raw_stackmathqa_40b4c29722f085661636841438bc680be27c1cc4b216c7b14a4f6fb6595e2c334",
+      "source_id": "physics:348145:0",
+      "task15_audit_index": 42
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "fb984b3155975ea82c13cf24e7fd3fffce77630ca07b54fed30ca90618753ba2",
+      "record_id": "raw_stackmathqa_cc3564492712e209943519190443455378c887259162326a610fc1e4b9c48044",
+      "source_id": "physics:191712:0",
+      "task15_audit_index": 44
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "4aa2823186b2b414c0d2847c620697949fa468973ecf6796c09b05a33f80ac88",
+      "record_id": "raw_stackmathqa_09dd2244205be95189126252ed168902ab5c4c6a6826457145be11df5574f256",
+      "source_id": "physics:658710:0",
+      "task15_audit_index": 46
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "c74bcffa9d388a74b54cf402e02eae0beb4e0957d7e2f690445464f27a63aab2",
+      "record_id": "raw_stackmathqa_02238603edc37e22c6578b093c326579eb7a26baa4802d30be662d7889aa79f3",
+      "source_id": "physics:390716:0",
+      "task15_audit_index": 47
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "MODEL_DECISION_CONFLICT",
+      "coverage": [
+        "gate2_compatible_positive_conflict"
+      ],
+      "raw_sha256": "f36fb4ddf5e66aa2c02b36d58b7de24956343495577a7501f137ff0340adf699",
+      "record_id": "raw_stackmathqa_662025f518215bf125b144dd18e6c82eeb436285c521404763040c19c50fa8c2",
+      "source_id": "physics:23682:1",
+      "task15_audit_index": 56
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "42e5e817841237bfe3d39b2a7d948518d484ab5bd8af4d02ef222150385883d6",
+      "record_id": "raw_stackmathqa_3b41eb3927c4a4777409b001a02a5ab24471f2e98e68aff6ec56f03501730506",
+      "source_id": "physics:76308:3",
+      "task15_audit_index": 58
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "b760b16194599ffcc7bc21e8f2d4f4b13430df2ed69cb096b45d460c48f2e090",
+      "record_id": "raw_stackmathqa_a89945dcf7eaec6b36e8e160844176479ee89665a1363ec00e92d6177c62306f",
+      "source_id": "physics:540721:0",
+      "task15_audit_index": 60
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "fd406bcddbf23cd17ce0baa416bef2a24ac580a24e9c28681ca6e30ba49acde8",
+      "record_id": "raw_stackmathqa_d9fba8f9c9080af5b2ed07e396a08327d3c1cff8f2cae91fb3eaa309c538d59b",
+      "source_id": "statistics:206494:1",
+      "task15_audit_index": 63
+    },
+    {
+      "baseline_manual_verdict": "REJECT_CONFIRMED",
+      "baseline_task15_reject_reason": "NON_STEM",
+      "coverage": [
+        "precision_control"
+      ],
+      "raw_sha256": "14d53ba0422e531a17bc3a0376e9a8763adba35174eafc25169d7d37f7154811",
+      "record_id": "raw_stackmathqa_b273b1b2e5ff5305526493db2825409a5068754188872da17f60c1c75405bf68",
+      "source_id": "statistics:4980:3",
+      "task15_audit_index": 64
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "a76f5a2b6aa631e2823f2e93cc1dcf4fb8b4dcc3467a5b33f0b765466cbf1e60",
+      "record_id": "raw_stackmathqa_cbe35069e7600e1bc53c0a497731f9b9e3ad7a13e03ae35780dcf40b77e047c7",
+      "source_id": "statistics:271780:0",
+      "task15_audit_index": 70
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "247e271281028d9f70a2d9bcd7721e48f1d287ef7d87fb6a3b1b8f44f68cffca",
+      "record_id": "raw_stackmathqa_e10d75ba5c3a9e69129745eb673845e1a3ccbb7ce55ee848e95e399dc67d5c2b",
+      "source_id": "statistics:494429:1",
+      "task15_audit_index": 71
+    },
+    {
+      "baseline_manual_verdict": "REJECT_CONFIRMED",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "precision_control"
+      ],
+      "raw_sha256": "d4a701107a35ba5b04941631722f160615ab697ba96885f5a629ae84d3dbffb7",
+      "record_id": "raw_stackmathqa_049f078113a66229ef55a53422fa72cf5bc85266a9bfb52f3f05b4a95401c36",
+      "source_id": "statistics:541038:0",
+      "task15_audit_index": 73
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "MODEL_DECISION_CONFLICT",
+      "coverage": [
+        "gate2_compatible_positive_conflict"
+      ],
+      "raw_sha256": "c4e06cab46931cdbaf1756df0aa718a44a86ef1272a23e71a03ca1789312df31",
+      "record_id": "raw_stackmathqa_775f30afc99f073ef334622b339f11b61d1d5a8f04c57e8e4422481084821f85",
+      "source_id": "mathoverflow:88899:0",
+      "task15_audit_index": 81
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "dd9c17180e6dd4f9a86d5966d96c5906710558c8cc9bf4fc5d0a8552287e54c9",
+      "record_id": "raw_stackmathqa_489337129ca7f8f24ef8de6521908938f766b8cab0b9e3c5370702291165e05d",
+      "source_id": "mathoverflow:415885:0",
+      "task15_audit_index": 82
+    },
+    {
+      "baseline_manual_verdict": "REJECT_CONFIRMED",
+      "baseline_task15_reject_reason": "NOT_PROBLEM",
+      "coverage": [
+        "precision_control"
+      ],
+      "raw_sha256": "06ef2d4146264947fd4f320766690176457770be9f15900ee24f2e4bd6257724",
+      "record_id": "raw_stackmathqa_ed0647501371495299407a56d9f86beaac0e2a8eb95da4f47d86b539d7f019f3",
+      "source_id": "mathoverflow:7247:2",
+      "task15_audit_index": 83
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "4ffaf30aec7103f3f354e037921722356210539633592197c622824e9da62c36",
+      "record_id": "raw_stackmathqa_a283b0419bbbdd2827be18158656fb5b28cbe03d02bca0c7d0390670a125f9ca",
+      "source_id": "mathoverflow:423011:0",
+      "task15_audit_index": 84
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "5f1380141538926696535cdcdbd5148cf8e50ad9e69472aad66f650a30751282",
+      "record_id": "raw_stackmathqa_bdb0b00c37ad2a6e6ed937592a9cb5e0c2b175334558706ef8e2eae5e0f04e98",
+      "source_id": "mathoverflow:120975:0",
+      "task15_audit_index": 87
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "8d5ed45cf29034ad4cdfda1b44f978f7f0e29b8cc2768d81b84f1fe3121b3bbe",
+      "record_id": "raw_stackmathqa_d598c9ecab1b93ade221851608a913a2f19d2c26da5c00fde455563f4872c682",
+      "source_id": "mathoverflow:354215:0",
+      "task15_audit_index": 88
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "7e3cdde2f912d935425f6a078ac24826add999f0210293c13ba4c9ac8221601d",
+      "record_id": "raw_stackmathqa_d2aaabec1144af300bb0509a4cc037b1f78d681f33e11b5e843ad414ff7a6689",
+      "source_id": "mathoverflow:206332:0",
+      "task15_audit_index": 91
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "5e02f69319747945b23842755195624090f10424055635182b48eaa37a390920",
+      "record_id": "raw_stackmathqa_89fd0e63036e5c83112b39538030d6ebaa63f164872aef8dc40e28c8876fe568",
+      "source_id": "mathoverflow:434799:0",
+      "task15_audit_index": 92
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "PROBLEM_TYPE_UNCERTAIN",
+      "coverage": [
+        "gate2_classification_threshold_evidence"
+      ],
+      "raw_sha256": "076517e21097c2f684f66a0a0c173211a17fffd9594ea3599ecee7b135a559b7",
+      "record_id": "raw_stackmathqa_873b074174ad8d7562f7ed03cb0e6598352c21e432a9c1c6a580488864dda6c8",
+      "source_id": "mathoverflow:179618:0",
+      "task15_audit_index": 95
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "7ddd38775a95f1e48cf8217af43425da6b5efdaacbdae37fc265fa447dccaeaf",
+      "record_id": "raw_stackmathqa_5973c7eabbaa8130f6ccdf9b9737975bb5c183a7e2fc946f9bee1a92414ea48b",
+      "source_id": "mathoverflow:325965:0",
+      "task15_audit_index": 98
+    },
+    {
+      "baseline_manual_verdict": "FALSE_REJECT",
+      "baseline_task15_reject_reason": "ANSWER_NOT_EXTRACTABLE",
+      "coverage": [
+        "gate3_source_grounded_answer_extraction"
+      ],
+      "raw_sha256": "c7a236ccf808703e6856d5311f49bb65dfd01ff51e8b25eb87069091847fa039",
+      "record_id": "raw_stackmathqa_a90f524eb66bd0b1f923e9b2bf418e4a505ecc26c5076a4c30a34056eabbfd10",
+      "source_id": "mathoverflow:377204:0",
+      "task15_audit_index": 99
+    }
+  ],
+  "sample": {
+    "raw_sha256": [
+      "2044b354536bf45a86b9fe948ad7dc0cc86cfd9c0304daf1f91982659580d505",
+      "a90a42d2bff29cfcc454f5adf787f7a642d7423367533e49a37427d2f866c1f4",
+      "73cfeeaa55454bef8db46ad0c1d777484f7ebb03752acfd33299159bfe29206e",
+      "d04d30b6146b81238dc2786fa0da49457addc24d7c1b0e083c8e657105621fc1",
+      "6ae84a274ad14b531f2ffa6746c8dd8fe724646d0615e70f2c37151e043b6f9c",
+      "02d2103c5cf4cea57a97a6816f43a2bf01fe42a2353fd242f4f8cb15d810decd",
+      "58d66855aa3323bcf34290eaa1afcc7bc0c60a865b1e3796115ae4cbbdbc8ca7",
+      "17abcd415fb67deb4740b4624a231de65ac1b4daf7b94c22f5860a8ffdfc3bd2",
+      "3314409225239cc8f9c3e4697188f6f1d16d1388211bc8a9b9656c185d7fd58d",
+      "e0337766bebe0ebb3719ad7866ac8b209cfb88936e9528fa58bc78dfef0ffd8c",
+      "bffbb9aba40579630db63e136abf6a30fd01b967a237360ee435f1fb77354ac8",
+      "4deb3f4f77b724cc0da2e6722eba372272ba86e2ff6be089c89bf450375e9406",
+      "51f92672a03f9aabea3897f90541de238f020f855af298639ee62724cab38258",
+      "f8714b97c236774f029f94089175f12d7d7994e03832ea4398cb6b46da860574",
+      "269d28fe5b84625f596398c3e3cf8d9bac8f37bc0edb259b1c1d47ac2f456c70",
+      "ab5324a083529f27b48c89b9fe5c2cec91241c3c57d6fca1dc77f771fcfe3a56",
+      "ab902d81a8715b2ea9f0f754381dcd2ba4a676c972dbe834cd6ecdc0aae4693a",
+      "d147bc27f390e68674d1e7d786537a8d5199bab10deab32125edcb3246ad3378",
+      "85b6cbd7c4dd5a2aaec9c66c97c32a9a3a92fc83a83b07c219781b7026c0594a",
+      "fbddef7171e8654c2e5e1b5c5787057bfa2aa83ad725c807e5de4f9e987f1023",
+      "e32e233508cb23c63e5eee7024e7ea15eaa6a667cf636cd2826108205868c1ea",
+      "0f1f82fe1f0af223b7f10b79b848cdeeeb519dd2003f258ed9d38e403e2eb6f7",
+      "46ef59d438658862fa67d5e2dcef4251c2395fe3d4241a53d8a40fffd819f1df",
+      "6dc89bbf6f14313e45711d10fb3c303a7674e620191fe950dab9dc5385d7ee29",
+      "2d394cda5cdc5a0cd3d014c047df0840acc9ed7873c05d424bff79d47ac1d16a",
+      "a4b4833718211de8400a564d57a65ec081222b8c837254a85d9977a54d78a91b",
+      "473f080e98229b4be650abcad0b4a004044d5c451d42a0258e73a46643b4d943",
+      "8a92818ca0bff7f6cefe4f0b745c3d3137c8562125ba25127bc165941e46f932",
+      "fb984b3155975ea82c13cf24e7fd3fffce77630ca07b54fed30ca90618753ba2",
+      "4aa2823186b2b414c0d2847c620697949fa468973ecf6796c09b05a33f80ac88",
+      "c74bcffa9d388a74b54cf402e02eae0beb4e0957d7e2f690445464f27a63aab2",
+      "f36fb4ddf5e66aa2c02b36d58b7de24956343495577a7501f137ff0340adf699",
+      "42e5e817841237bfe3d39b2a7d948518d484ab5bd8af4d02ef222150385883d6",
+      "b760b16194599ffcc7bc21e8f2d4f4b13430df2ed69cb096b45d460c48f2e090",
+      "fd406bcddbf23cd17ce0baa416bef2a24ac580a24e9c28681ca6e30ba49acde8",
+      "14d53ba0422e531a17bc3a0376e9a8763adba35174eafc25169d7d37f7154811",
+      "a76f5a2b6aa631e2823f2e93cc1dcf4fb8b4dcc3467a5b33f0b765466cbf1e60",
+      "247e271281028d9f70a2d9bcd7721e48f1d287ef7d87fb6a3b1b8f44f68cffca",
+      "d4a701107a35ba5b04941631722f160615ab697ba96885f5a629ae84d3dbffb7",
+      "c4e06cab46931cdbaf1756df0aa718a44a86ef1272a23e71a03ca1789312df31",
+      "dd9c17180e6dd4f9a86d5966d96c5906710558c8cc9bf4fc5d0a8552287e54c9",
+      "06ef2d4146264947fd4f320766690176457770be9f15900ee24f2e4bd6257724",
+      "4ffaf30aec7103f3f354e037921722356210539633592197c622824e9da62c36",
+      "5f1380141538926696535cdcdbd5148cf8e50ad9e69472aad66f650a30751282",
+      "8d5ed45cf29034ad4cdfda1b44f978f7f0e29b8cc2768d81b84f1fe3121b3bbe",
+      "7e3cdde2f912d935425f6a078ac24826add999f0210293c13ba4c9ac8221601d",
+      "5e02f69319747945b23842755195624090f10424055635182b48eaa37a390920",
+      "076517e21097c2f684f66a0a0c173211a17fffd9594ea3599ecee7b135a559b7",
+      "7ddd38775a95f1e48cf8217af43425da6b5efdaacbdae37fc265fa447dccaeaf",
+      "c7a236ccf808703e6856d5311f49bb65dfd01ff51e8b25eb87069091847fa039"
+    ],
+    "record_ids": [
+      "raw_stackmathqa_d348807150e3f9c068f65e65e49f48839b99aa7a0abf638af47ce73fe0da03b3",
+      "raw_stackmathqa_85c46552681dddc2c70865157260f844e180dd39c43f8cf10cfb20dd6861ad8f",
+      "raw_stackmathqa_f7762046904511bb6ebfaf2e4f125ea85bd73ee35d16f895fd5a0d73fc24bb52",
+      "raw_stackmathqa_9a6e85898c29b014a8023a88f71b74047819b9fec8be775f96b76e34550edba7",
+      "raw_stackmathqa_188de82d5808cfbf56de588550007f0d5691d29bfabe740e1464fb10c20e57d9",
+      "raw_stackmathqa_005c00d0678c34313789636524ff500a81d2a2e87e0afff0582992ba2146bc1e",
+      "raw_stackmathqa_6eb0b5a9b44043d7e36af57a3d38f6b56f1b6cd877d8f0a4178dbb73497ba773",
+      "raw_stackmathqa_5a1cca5a575c6300466717e112de92ba495dc41ba43a93c4408520527bd4669e",
+      "raw_stackmathqa_80e132d37f4123333b957d1970d84f29be2f435694593dd81a3eb1ba4d2ba2cf",
+      "raw_stackmathqa_83566af0a21583b16e4c1e2c6064c7149ae22ba17cc63f7191480651803befde",
+      "raw_stackmathqa_29d5fc9abf0666108842087818b628cff368145ad5fdf1ce6f88aaa4df4f6133",
+      "raw_stackmathqa_acad4b62acbb4a6e4284ac9777d02fe98b6180808a3e923e2ef17a9709c0f5e6",
+      "raw_stackmathqa_112f5e99cb8f60bb4a5dd7c5e41b606aa1ba14c6a614fbbe4801947fd2db7555",
+      "raw_stackmathqa_a3d71b3f27e4b61ae25533b89cb06eb12a12a4d3e8bcdb1abff688b909c5cfcc",
+      "raw_stackmathqa_1966b9da140a001e50d934129022411d2458f1c1c094740ea1328333a02a2aee",
+      "raw_stackmathqa_e49fe4da446e0e120b19f48c5c07a3df93a1b64f0037e5f261a8bb1003a91da8",
+      "raw_stackmathqa_8f8f5ec4c4d2791e49983fc9044dd4a75fc8f0eea410e1d43d94d770f944da7c",
+      "raw_stackmathqa_7d1eb20028b433e7d189f9cfca136d25cb0889851610497141a3ed70b39c6528",
+      "raw_stackmathqa_2c573c4f4f5c451c221fc928471901ca88dccf26d404c9ae75c6e718bf8939d8",
+      "raw_stackmathqa_9bb62eed4c7e25bccb0671448a48742ffabfbb966518a966213386b38af259dc",
+      "raw_stackmathqa_36383322c62efa98ac513621c69ff25f05bdb72a2c74dadc9870c33f8b9c030d",
+      "raw_stackmathqa_b790d91ada9c89b34d7556fcb3ee75498de47a8753f2308812901461b05e201c",
+      "raw_stackmathqa_8039162d0049b08109d9ab95dac88441e2b55acc6762c6a1d0fe0484452b1c01",
+      "raw_stackmathqa_08336acc6ce6413fb6dbc5392438cc7907e440384a062138ebc11c2c4afeac38",
+      "raw_stackmathqa_02710c86aaba8c5134a75a6a9932a022057f16b6da36955041ca4e053f3912d7",
+      "raw_stackmathqa_974d85300e40781760285d693308f49f16e691f27d830b4085c5049b51783951",
+      "raw_stackmathqa_2eb24bfc4475f0e84ea748b53afe235502d9f6c9b396c650e8244ff0781d9bf2",
+      "raw_stackmathqa_40b4c29722f085661636841438bc680be27c1cc4b216c7b14a4f6fb6595e2c334",
+      "raw_stackmathqa_cc3564492712e209943519190443455378c887259162326a610fc1e4b9c48044",
+      "raw_stackmathqa_09dd2244205be95189126252ed168902ab5c4c6a6826457145be11df5574f256",
+      "raw_stackmathqa_02238603edc37e22c6578b093c326579eb7a26baa4802d30be662d7889aa79f3",
+      "raw_stackmathqa_662025f518215bf125b144dd18e6c82eeb436285c521404763040c19c50fa8c2",
+      "raw_stackmathqa_3b41eb3927c4a4777409b001a02a5ab24471f2e98e68aff6ec56f03501730506",
+      "raw_stackmathqa_a89945dcf7eaec6b36e8e160844176479ee89665a1363ec00e92d6177c62306f",
+      "raw_stackmathqa_d9fba8f9c9080af5b2ed07e396a08327d3c1cff8f2cae91fb3eaa309c538d59b",
+      "raw_stackmathqa_b273b1b2e5ff5305526493db2825409a5068754188872da17f60c1c75405bf68",
+      "raw_stackmathqa_cbe35069e7600e1bc53c0a497731f9b9e3ad7a13e03ae35780dcf40b77e047c7",
+      "raw_stackmathqa_e10d75ba5c3a9e69129745eb673845e1a3ccbb7ce55ee848e95e399dc67d5c2b",
+      "raw_stackmathqa_049f078113a66229ef55a53422fa72cf5bc85266a9bfb52f3f05b4a95401c36",
+      "raw_stackmathqa_775f30afc99f073ef334622b339f11b61d1d5a8f04c57e8e4422481084821f85",
+      "raw_stackmathqa_489337129ca7f8f24ef8de6521908938f766b8cab0b9e3c5370702291165e05d",
+      "raw_stackmathqa_ed0647501371495299407a56d9f86beaac0e2a8eb95da4f47d86b539d7f019f3",
+      "raw_stackmathqa_a283b0419bbbdd2827be18158656fb5b28cbe03d02bca0c7d0390670a125f9ca",
+      "raw_stackmathqa_bdb0b00c37ad2a6e6ed937592a9cb5e0c2b175334558706ef8e2eae5e0f04e98",
+      "raw_stackmathqa_d598c9ecab1b93ade221851608a913a2f19d2c26da5c00fde455563f4872c682",
+      "raw_stackmathqa_d2aaabec1144af300bb0509a4cc037b1f78d681f33e11b5e843ad414ff7a6689",
+      "raw_stackmathqa_89fd0e63036e5c83112b39538030d6ebaa63f164872aef8dc40e28c8876fe568",
+      "raw_stackmathqa_873b074174ad8d7562f7ed03cb0e6598352c21e432a9c1c6a580488864dda6c8",
+      "raw_stackmathqa_5973c7eabbaa8130f6ccdf9b9737975bb5c183a7e2fc946f9bee1a92414ea48b",
+      "raw_stackmathqa_a90f524eb66bd0b1f923e9b2bf418e4a505ecc26c5076a4c30a34056eabbfd10"
+    ],
+    "sample_sha256": "50026b04d0d5a55a27c8a796f54f35eeea756410835a82c29bbd155013d08304",
+    "total": 50
+  },
+  "schema_version": "task16-small-recert-sample-v1",
+  "selection_frozen_before_model_calls": true,
+  "selection_policy": {
+    "description": "All 43 Task15 manually identified false rejects plus 7 predeclared REJECT_CONFIRMED precision controls; preserve Task15 100-child order.",
+    "false_reject_count": 43,
+    "no_post_outcome_reselection": true,
+    "precision_control_audit_indices": [
+      2,
+      15,
+      25,
+      42,
+      64,
+      73,
+      83
+    ],
+    "precision_control_count": 7,
+    "task15_downstream_micro_overlay_audit_indices": [
+      15,
+      28,
+      35
+    ],
+    "total": 50
+  }
+}
