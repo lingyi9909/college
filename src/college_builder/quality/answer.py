@@ -13,11 +13,20 @@ from college_builder.domain.source import JsonValue, NormalizedQA
 from college_builder.quality.engine import GateContext, GateResultEvidence
 
 _CONCLUSION_RE = re.compile(
-    r"(?is)(?:therefore|thus|hence|final\s+answer\s*[:：]|answer\s*[:：]|因此|所以|故)\s*"
-    r"(?P<answer>[^\n]+?)\s*$"
+    r"(?is)(?:therefore|thus|hence|so|final\s+answer\s*[:：]|answer\s*[:：]|因此|所以|故)"
+    r"\s*[,;:]?\s*(?P<answer>[^\n]+?)\s*$"
 )
 _TERMINAL_MATH_RE = re.compile(
-    r"(?s)^(?:\$[^$\n]+\$|\\\([^\n]+\\\)|\\\[[^\n]+\\\]|[+-]?(?:\d+(?:\.\d+)?|\d+\s*/\s*\d+))$"
+    r"(?s)^(?:\$\$[^\n]+\$\$|\$[^$\n]+\$|\\\([^\n]+\\\)|\\\[[^\n]+\\\]|"
+    r"[+-]?(?:\d+(?:\.\d+)?|\d+\s*/\s*\d+))$"
+)
+_NAMED_CONSTRUCTION_RE = re.compile(
+    r"(?is)\bis\s+given\s+by\s*\n?\s*(?P<answer>\$\$[^\n]+\$\$)"
+    r"(?:\s*\n\s*I\s+hope\s+this\s+helps[^\n]*)?\s*$"
+)
+_WKB_CONDITION_RE = re.compile(
+    r"(?is)\bThen\s+you\s+get\s*\n?\s*(?P<answer>\$\$[^\n]+\$\$)\s*\n\s*"
+    r"which\s+is\s+a\s+typical\s+WKB\s+quantization\s+integral\b"
 )
 _REFERENTIAL_ANSWER_RE = re.compile(
     r"(?is)(?:\b(?:shown|given|stated)\s+above\b|\b(?:see|refer\s+to)\b|"
@@ -91,6 +100,8 @@ def extract_source_answer(candidate: NormalizedQA) -> AnswerExtraction:
 
     analysis_text = candidate.analysis
     analysis_span = _conclusion_span(analysis_text)
+    if analysis_span is None:
+        analysis_span = _named_formula_span(analysis_text)
     if analysis_span is None:
         analysis_span = _terminal_answer_span(analysis_text)
     if analysis_span is not None:
@@ -219,6 +230,20 @@ def _conclusion_span(text: str) -> tuple[int, int, str] | None:
     match = _CONCLUSION_RE.search(text)
     if match is None:
         return None
+    return _validated_match_span(text, match)
+
+
+def _named_formula_span(text: str) -> tuple[int, int, str] | None:
+    """Extract only formula blocks with narrow, source-explicit semantic anchors."""
+
+    for pattern in (_NAMED_CONSTRUCTION_RE, _WKB_CONDITION_RE):
+        match = pattern.search(text)
+        if match is not None:
+            return _validated_match_span(text, match)
+    return None
+
+
+def _validated_match_span(text: str, match: re.Match[str]) -> tuple[int, int, str] | None:
     start, end = match.span("answer")
     while start < end and text[start].isspace():
         start += 1
