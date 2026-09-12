@@ -13,7 +13,7 @@ from college_builder.domain.source import JsonValue, NormalizedQA
 from college_builder.quality.engine import GateContext, GateResultEvidence
 
 _CONCLUSION_RE = re.compile(
-    r"(?is)(?:therefore|thus|hence|so|final\s+answer\s*[:：]|answer\s*[:：]|因此|所以|故)"
+    r"(?is)(?:therefore|thus|hence|\bso\b|final\s+answer\s*[:：]|answer\s*[:：]|因此|所以|故)"
     r"\s*[,;:]?\s*(?P<answer>[^\n]+?)\s*$"
 )
 _TERMINAL_MATH_RE = re.compile(
