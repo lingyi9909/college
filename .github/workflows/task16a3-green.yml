@@ -13,16 +13,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 7f8293d835760165311d9e0ae2152e0bd70f79aa
+          ref: b598aa61f6c4f09a49f7be2eb7c1c80adc46c57d
           fetch-depth: 1
       - name: Exact HEAD guard
-        run: test "$(git rev-parse HEAD)" = "7f8293d835760165311d9e0ae2152e0bd70f79aa"
+        run: test "$(git rev-parse HEAD)" = "b598aa61f6c4f09a49f7be2eb7c1c80adc46c57d"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m pip install -e '.[dev]'
       - name: Task16A3 focused regressions
-        run: pytest tests/unit/quality/test_analysis.py tests/e2e/test_task15_provider_prompt_protocol.py tests/e2e/test_gold_regression.py -q
+        run: pytest tests/unit/quality/test_analysis.py tests/unit/quality/test_task16a3_analysis_evidence_relevance.py tests/e2e/test_task15_provider_prompt_protocol.py tests/e2e/test_gold_regression.py -q
       - name: Full pytest
         run: pytest -q
       - name: Ruff
