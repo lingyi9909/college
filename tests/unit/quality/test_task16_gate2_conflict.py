@@ -9,7 +9,6 @@ from college_builder.providers.fake import FakeStructuredModelProvider
 from college_builder.quality.classify import ProblemGate
 from college_builder.quality.engine import GateContext, GateEngine
 
-
 _DEFAULT_QUESTION = "Prove the stated identity and derive the requested expression."
 
 # Frozen from Task 15 real-model artifact 10183643305. Decision fields are exact;
