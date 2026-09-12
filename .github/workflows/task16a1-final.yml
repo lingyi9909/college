@@ -14,9 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 91eed9419f979c76e11751e2dbba7a54290bb21e
+          ref: e8e39efe9ec97183da7cd11e37cbec1d059f50cc
       - name: Exact candidate guard
-        run: test "$(git rev-parse HEAD)" = "91eed9419f979c76e11751e2dbba7a54290bb21e"
+        run: test "$(git rev-parse HEAD)" = "e8e39efe9ec97183da7cd11e37cbec1d059f50cc"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
