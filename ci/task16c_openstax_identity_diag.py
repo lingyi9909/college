@@ -34,14 +34,29 @@ def main() -> None:
     assert hashlib.sha256(data).hexdigest() == EXPECTED_SHA
     parsed = json.loads(data)
     by_id: dict[str, list[dict[str, object]]] = defaultdict(list)
+    by_book_id: dict[tuple[str, str], int] = defaultdict(int)
+    by_book_chapter_id: dict[tuple[str, str, str], int] = defaultdict(int)
     count = 0
     for row in rows(parsed):
         count += 1
-        by_id[str(row["id"])].append(row)
+        source_id = str(row["id"])
+        book = str(row.get("book", ""))
+        chapter = str(row.get("chapter_number", ""))
+        by_id[source_id].append(row)
+        by_book_id[(book, source_id)] += 1
+        by_book_chapter_id[(book, chapter, source_id)] += 1
     duplicates = {key: value for key, value in by_id.items() if len(value) > 1}
+    duplicate_book_id = {key: value for key, value in by_book_id.items() if value > 1}
+    duplicate_book_chapter_id = {
+        key: value for key, value in by_book_chapter_id.items() if value > 1
+    }
     print("ROW_COUNT", count)
     print("UNIQUE_ID_COUNT", len(by_id))
     print("DUPLICATE_ID_COUNT", len(duplicates))
+    print("UNIQUE_BOOK_ID_COUNT", len(by_book_id))
+    print("DUPLICATE_BOOK_ID_COUNT", len(duplicate_book_id))
+    print("UNIQUE_BOOK_CHAPTER_ID_COUNT", len(by_book_chapter_id))
+    print("DUPLICATE_BOOK_CHAPTER_ID_COUNT", len(duplicate_book_chapter_id))
     for key in sorted(duplicates)[:10]:
         print("DUPLICATE", key, len(duplicates[key]))
         for row in duplicates[key]:
