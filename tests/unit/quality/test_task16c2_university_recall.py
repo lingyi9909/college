@@ -65,7 +65,10 @@ def _run(
     "question",
     [
         "Explain how microscopic particle motion determines the observed gas pressure.",
-        "A hydroelectric plant converts gravitational potential energy into electrical energy; calculate the output power.",
+        (
+            "A hydroelectric plant converts gravitational potential energy into "
+            "electrical energy; calculate the output power."
+        ),
         "Explain the recoil of a body using Newton's third law and conservation of momentum.",
         "Why can ordinary random cross-validation be biased for an autocorrelated time series?",
         "Interpret the threshold parameters in an ordinal regression model.",
