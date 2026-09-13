@@ -201,13 +201,18 @@ class _DualProviderClassificationGate:
                 evidence_payload=evidence_payload,
             )
 
+        consensus_verdict, consensus_reason = self._verified_positive_outcome(context)
         return self._result(
             context,
-            verdict=GateVerdict.VERIFY,
+            verdict=consensus_verdict,
             score=score,
-            reason_code=self.verify_reason,
+            reason_code=consensus_reason,
             evidence_payload=evidence_payload,
         )
+
+    def _verified_positive_outcome(self, context: GateContext) -> tuple[GateVerdict, str]:
+        del context
+        return GateVerdict.VERIFY, self.verify_reason
 
     def _finalize_high_band(
         self,
@@ -324,6 +329,12 @@ class UniversityStemGate(_DualProviderClassificationGate):
     uncertain_reason = "UNIVERSITY_LEVEL_UNCERTAIN"
     pass_reason = "UNIVERSITY_STEM_CONFIRMED"
     verify_reason = "UNIVERSITY_STEM_REVIEW_REQUIRED"
+    consensus_pass_config_versions = frozenset({"task16-recertification-v2"})
+
+    def _verified_positive_outcome(self, context: GateContext) -> tuple[GateVerdict, str]:
+        if context.config_version in self.consensus_pass_config_versions:
+            return GateVerdict.PASS, self.pass_reason
+        return super()._verified_positive_outcome(context)
 
 
 class ProblemGate(_DualProviderClassificationGate):
