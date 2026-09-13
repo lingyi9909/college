@@ -1,0 +1,98 @@
+{
+  "certification": "Task16C small production validation",
+  "status": "NOT_ACCEPTED_FOR_SCALE_UP",
+  "exact_production_code_sha": "456174b0ed0497239733ddd2909eea39eda83ecb",
+  "github_actions": {
+    "run_id": 34734958843,
+    "job_id": 103664606841,
+    "artifact_id": 10311081780,
+    "artifact_sha256": "a73531087bd043ffcf547a17684eb3903c5b01d666bee11efe912c5cdf7fc9d4"
+  },
+  "sample": {
+    "count": 200,
+    "payload_sha256": "d47c87205417fcc1607c3a8736c4859a1c0ae7ea4818c7d2396d9a28b002912a",
+    "record_identity_sha256": "3c7876808773b45452ad917f781990faef46ba899d22af947dd3ba102dc489e8",
+    "selection_frozen_before_model_calls": true,
+    "strata": {
+      "math": 80,
+      "mathoverflow": 20,
+      "statistics": 40,
+      "physics": 40,
+      "openstax": 20
+    }
+  },
+  "production_pipeline": {
+    "accepted": 1,
+    "rejected": 199,
+    "provider_errors": 0,
+    "funnel": {
+      "raw": 200,
+      "normalized": 200,
+      "stem": 119,
+      "university": 105,
+      "problem": 30,
+      "answer_valid": 7,
+      "analysis_valid": 7,
+      "after_dedup": 7,
+      "alignment_pass": 2,
+      "final_accepted": 1
+    },
+    "reject_reason_counts": {
+      "ANSWER_NOT_EXTRACTABLE": 23,
+      "CORRECTNESS_EVIDENCE_INVALID": 1,
+      "MODEL_DECISION_CONFLICT": 11,
+      "NON_STEM": 3,
+      "NOT_PROBLEM": 4,
+      "NOT_UNIVERSITY_LEVEL": 11,
+      "PROBLEM_TYPE_UNCERTAIN": 67,
+      "QA_ALIGNMENT_EVIDENCE_INVALID": 4,
+      "QA_ALIGNMENT_UNCERTAIN": 1,
+      "UNIVERSITY_LEVEL_UNCERTAIN": 74
+    },
+    "exact_19_field_export_structurally_valid": true
+  },
+  "fresh_verification": {
+    "task16_focused_pytest": "59 passed",
+    "full_pytest": "547 passed",
+    "ruff": "PASS",
+    "mypy": "PASS (33 source files)"
+  },
+  "manual_quality_audit": {
+    "scope": "all accepted records plus stratified samples from the two dominant reject reasons",
+    "accepted_records_audited": 1,
+    "correct_accept": 0,
+    "false_accept": 1,
+    "false_accept_detail": {
+      "source_id": "1eafca778505d699033c92554b5984621f11380d:6025:fs-id1167132353612",
+      "question": "Why is it correct to use geometric optics to analyze a microscope image?",
+      "source_solution": "Microscopes create images of macroscopic size, so geometric optics applies.",
+      "exported_text_answer": "geometric optics applies.",
+      "finding": "Gate3 conclusion-fragment extraction dropped the causal premise needed to answer the why-question; downstream correctness still accepted it."
+    },
+    "gate1_university_level_uncertain_sample": {
+      "audited": 10,
+      "clear_false_rejects": 5,
+      "borderline": 2,
+      "plausible_correct_rejects": 3,
+      "finding": "Clear university textbook/statistics questions are being rejected as UNIVERSITY_LEVEL_UNCERTAIN."
+    },
+    "gate2_problem_type_uncertain_sample": {
+      "audited": 10,
+      "clear_false_rejects": 8,
+      "borderline": 2,
+      "finding": "The prompt allows CONCEPTUAL as positive, but substantive conceptual/proof/calculation questions are rejected when model confidence is below the 0.98 gate threshold."
+    },
+    "license_provenance_issue": {
+      "observed": true,
+      "source_license_metadata": "cc-by-4.0",
+      "exported_static_info_source_license": "UNKNOWN"
+    }
+  },
+  "blockers": [
+    "Gate3 can extract an incomplete conclusion fragment that loses essential answer semantics and still pass correctness.",
+    "Gate1 has material false rejects on clear university-level source questions.",
+    "Gate2 has material false rejects because valid positive CONCEPTUAL/PROOF/CALCULATION items are rejected at sub-0.98 confidence.",
+    "License provenance is not preserved into exported static_info for the accepted OpenStax record."
+  ],
+  "scale_decision": "BLOCK_5K_AND_50K_UNTIL_BLOCKERS_ARE_FIXED_AND_SMALL_VALIDATION_IS_REPEATED"
+}
