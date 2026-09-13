@@ -18,5 +18,16 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install -e '.[dev]'
-      - name: Task16C1 focused test
-        run: pytest -q tests/unit/quality/test_task16_answer_recall.py
+      - name: Task16C1 focused regression
+        run: >-
+          pytest -q
+          tests/unit/quality/test_task16_answer_recall.py
+          tests/unit/quality/test_task16_task15_answer_evidence.py
+          tests/unit/quality/test_task16a4_downstream_span_protocol.py
+          tests/e2e/test_gold_regression.py
+      - name: Fresh full pytest
+        run: pytest -q
+      - name: Fresh Ruff
+        run: ruff check src tests
+      - name: Fresh MyPy
+        run: mypy src
