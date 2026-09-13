@@ -6,11 +6,16 @@ from college_builder.domain.source import NormalizedQA
 from college_builder.quality.answer import extract_source_answer
 
 
-def _candidate(analysis: str, *, answer: str = "") -> NormalizedQA:
+def _candidate(
+    analysis: str,
+    *,
+    answer: str = "",
+    question: str = "Solve the source problem.",
+) -> NormalizedQA:
     return NormalizedQA(
         record_id="norm-task16-answer",
         source_record_id="raw-task16-answer",
-        question="Solve the source problem.",
+        question=question,
         answer=answer,
         analysis=analysis,
         subject_candidates=("mathematics",),
@@ -75,6 +80,19 @@ def test_gate3_extracts_standalone_terminal_numeric_source_answer(expected: str)
     assert extraction.source_span == (
         f"analysis:{extraction.start_offset}:{extraction.end_offset}"
     )
+
+
+def test_gate3_preserves_complete_causal_answer_for_why_question() -> None:
+    question = "Why can geometric optics be used to analyze a microscope image?"
+    analysis = "Microscopes create images of macroscopic size, so geometric optics applies."
+
+    extraction = extract_source_answer(_candidate(analysis, question=question))
+
+    assert extraction.final_answer == analysis
+    assert extraction.source_field == "analysis"
+    assert extraction.start_offset == 0
+    assert extraction.end_offset == len(analysis)
+    assert extraction.source_span == f"analysis:0:{len(analysis)}"
 
 
 def test_gate3_does_not_derive_answer_when_terminal_source_text_is_absent() -> None:
