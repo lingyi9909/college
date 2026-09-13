@@ -28,6 +28,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install exact production code
+        working-directory: work
+        run: python -m pip install -e '.[dev]'
+
       - name: Guard exact production identity and model secrets
         working-directory: work
         shell: bash
@@ -54,10 +58,6 @@ jobs:
           print('TASK16C_PRODUCTION_IDENTITY_GUARD=PASS')
           print('TASK16C_CONFIG_SHA256=' + hashlib.sha256(Path('config/task16-recertification.yaml').read_bytes()).hexdigest())
           PY
-
-      - name: Install exact production code
-        working-directory: work
-        run: python -m pip install -e '.[dev]'
 
       - name: Pre-model Task16 focused regressions
         working-directory: work
