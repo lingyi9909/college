@@ -126,11 +126,24 @@ def test_gate2_low_positive_verifier_conflict_still_fails_closed() -> None:
     assert len(verifier.requests) == 1
 
 
+def test_gate2_low_positive_verifier_below_pass_threshold_does_not_pass() -> None:
+    question = "Explain the determinant criterion for invertibility."
+    result, _, verifier = _run(
+        question,
+        _decision("CONCEPTUAL", 0.85, question),
+        _decision("CONCEPTUAL", 0.95, question),
+    )
+
+    assert result.verdict is GateVerdict.VERIFY
+    assert result.evidence[0].reason_code == "PROBLEM_REVIEW_REQUIRED"
+    assert len(verifier.requests) == 1
+
+
 def test_gate2_sub_floor_positive_still_rejects_without_verifier() -> None:
     question = "Explain a simple algebraic identity."
     result, _, verifier = _run(
         question,
-        _decision("CONCEPTUAL", 0.69, question),
+        _decision("CONCEPTUAL", 0.79, question),
         _decision("CONCEPTUAL", 0.99, question),
     )
 
