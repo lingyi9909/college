@@ -71,14 +71,15 @@ def _iter_openstax_rows(node: object):
 
 
 def _openstax_record(row: dict[str, Any], row_offset: int) -> RawSourceRecord:
-    source_id = str(row["id"])
+    native_id = str(row["id"])
     question = row["problem"]
     solution = row["solution"]
     if not isinstance(question, str) or not question.strip():
         raise ValueError("OpenStax problem must be non-empty text")
     if not isinstance(solution, str) or not solution.strip():
         raise ValueError("OpenStax solution must be non-empty text")
-    identity = f"huggingface\0{OPENSTAX_DATASET}\0{source_id}".encode()
+    source_id = f"row:{row_offset}:id:{native_id}"
+    identity = f"huggingface\0{OPENSTAX_DATASET}\0{OPENSTAX_REVISION}\0{source_id}".encode()
     return RawSourceRecord.model_validate(
         {
             "record_id": f"raw_hf_{hashlib.sha256(identity).hexdigest()}",
@@ -94,6 +95,7 @@ def _openstax_record(row: dict[str, Any], row_offset: int) -> RawSourceRecord:
                 "language": row.get("language"),
                 "book": row.get("book"),
                 "chapter_number": row.get("chapter_number"),
+                "native_source_id": native_id,
                 "acquisition": {
                     "adapter": "task16c_openstax_raw_snapshot",
                     "row_offset": row_offset,
@@ -114,15 +116,11 @@ def _sample_openstax() -> tuple[tuple[RawSourceRecord, ...], dict[str, object]]:
         raise ValueError(f"OpenStax file SHA mismatch: {actual_sha}")
     raw = json.loads(OPENSTAX_PATH.read_text(encoding="utf-8"))
     heaps: list[tuple[int, str, RawSourceRecord]] = []
-    seen: set[str] = set()
     eligible = 0
     for row_offset, row in enumerate(_iter_openstax_rows(raw)):
-        source_id = str(row.get("id", ""))
-        if not source_id or source_id in seen:
-            if source_id in seen:
-                raise ValueError(f"duplicate OpenStax id: {source_id}")
+        native_id = str(row.get("id", ""))
+        if not native_id:
             continue
-        seen.add(source_id)
         language = row.get("language")
         if language not in (None, "en"):
             continue
@@ -146,6 +144,8 @@ def _sample_openstax() -> tuple[tuple[RawSourceRecord, ...], dict[str, object]]:
         key=lambda item: (item[0], item[1]),
     )
     selected = tuple(item[2] for item in ordered)
+    if len({record.record_id for record in selected}) != len(selected):
+        raise AssertionError("OpenStax deterministic source identity is not unique")
     logical_sha = _sha256_bytes(
         _canonical_json(
             {
@@ -159,6 +159,7 @@ def _sample_openstax() -> tuple[tuple[RawSourceRecord, ...], dict[str, object]]:
         "dataset": OPENSTAX_DATASET,
         "revision": f"git:{OPENSTAX_REVISION}",
         "source_file_sha256": actual_sha,
+        "identity_contract": "immutable_revision+row_offset+native_id",
         "eligible_english_rows": eligible,
         "quota": OPENSTAX_QUOTA,
         "logical_sample_sha256": logical_sha,
