@@ -21,6 +21,9 @@ _TERMINAL_MATH_RE = re.compile(
     r"(?s)^(?:\$\$[^\n]+\$\$|\$[^$\n]+\$|\\\([^\n]+\\\)|\\\[[^\n]+\\\]|"
     r"[+-]?(?:\d+(?:\.\d+)?|\d+\s*/\s*\d+))$"
 )
+_PLAIN_EQUATION_RE = re.compile(
+    r"(?is)^[A-Za-z][A-Za-z0-9_]*(?:\s*\([^\n)]*\))?\s*=\s*\S(?:.*\S)?$"
+)
 _NAMED_CONSTRUCTION_RE = re.compile(
     r"(?is)\bis\s+given\s+by\s*\n?\s*(?P<answer>\$\$[^\n]+\$\$)"
     r"(?:\s*\n\s*I\s+hope\s+this\s+helps[^\n]*)?\s*$"
@@ -29,10 +32,19 @@ _WKB_CONDITION_RE = re.compile(
     r"(?is)\bThen\s+you\s+get\s*\n?\s*(?P<answer>\$\$[^\n]+\$\$)\s*\n\s*"
     r"which\s+is\s+a\s+typical\s+WKB\s+quantization\s+integral\b"
 )
-_EXPLANATORY_QUESTION_RE = re.compile(
+_EXPLICIT_CAUSAL_QUESTION_RE = re.compile(
     r"(?is)(?:^\s*why\b|^\s*how\s+come\b|\bexplain\s+why\b|"
     r"\breason\s+(?:for|why)\b|\bwhat\s+causes?\b|"
     r"为什么|为何|解释.{0,12}(?:为什么|为何|原因)|说明.{0,12}原因)"
+)
+_GENERIC_EXPLAIN_QUESTION_RE = re.compile(
+    r"(?is)^\s*(?:explain|describe|discuss)\b|^\s*(?:解释|说明|阐述)"
+)
+_CAUSAL_PREMISE_SIGNAL_RE = re.compile(
+    r"(?is)(?:\b(?:because|due\s+to|owing\s+to|causes?|caused\s+by|"
+    r"leads?\s+to|results?\s+(?:from|in)|allows?|prevents?|increases?|"
+    r"decreases?|raises?|lowers?|produces?|induces?|drives?)\b|"
+    r"因为|由于|导致|使得|引起|造成)"
 )
 _SENTENCE_BOUNDARY_RE = re.compile(r"[.!?。！？](?:\s+|$)")
 _CAUSAL_ANCHORS = frozenset({"therefore", "thus", "hence", "so", "因此", "所以", "故"})
@@ -238,13 +250,44 @@ def _conclusion_span(text: str, question: str) -> tuple[int, int, str] | None:
     match = _CONCLUSION_RE.search(text)
     if match is None:
         return None
-    if _requires_explanatory_answer(question) and _is_causal_anchor(match.group("anchor")):
+    if not _is_causal_anchor(match.group("anchor")):
+        return _validated_match_span(text, match)
+
+    matched_answer = _validated_match_span(text, match)
+    if matched_answer is None:
+        return None
+    _, _, answer = matched_answer
+
+    if _requires_explicit_causal_answer(question):
         return _causal_sentence_span(text, match)
-    return _validated_match_span(text, match)
+
+    if _is_generic_explain_question(question):
+        if _is_self_contained_formal_result(answer):
+            return matched_answer
+        premise = _causal_premise(text, match)
+        if premise is None:
+            return None
+        if _CAUSAL_PREMISE_SIGNAL_RE.search(premise) is not None:
+            return _causal_sentence_span(text, match)
+        return None
+
+    return matched_answer
 
 
-def _requires_explanatory_answer(question: str) -> bool:
-    return _EXPLANATORY_QUESTION_RE.search(question) is not None
+def _requires_explicit_causal_answer(question: str) -> bool:
+    return _EXPLICIT_CAUSAL_QUESTION_RE.search(question) is not None
+
+
+def _is_generic_explain_question(question: str) -> bool:
+    return _GENERIC_EXPLAIN_QUESTION_RE.search(question) is not None
+
+
+def _is_self_contained_formal_result(answer: str) -> bool:
+    stripped = answer.strip().rstrip(".。")
+    return bool(
+        _TERMINAL_MATH_RE.fullmatch(stripped)
+        or _PLAIN_EQUATION_RE.fullmatch(stripped)
+    )
 
 
 def _is_causal_anchor(anchor: str) -> bool:
@@ -252,29 +295,41 @@ def _is_causal_anchor(anchor: str) -> bool:
     return normalized in _CAUSAL_ANCHORS
 
 
-def _causal_sentence_span(
-    text: str,
-    match: re.Match[str],
-) -> tuple[int, int, str] | None:
-    """Keep source cause + conclusion together for explanatory questions."""
-
-    answer_span = _validated_match_span(text, match)
-    if answer_span is None:
-        return None
-    _, answer_end, _ = answer_span
+def _causal_premise(text: str, match: re.Match[str]) -> str | None:
     anchor_start = match.start("anchor")
-
     sentence_start = 0
     for boundary in _SENTENCE_BOUNDARY_RE.finditer(text, 0, anchor_start):
         sentence_start = boundary.end()
     while sentence_start < anchor_start and text[sentence_start].isspace():
         sentence_start += 1
+    premise = text[sentence_start:anchor_start].strip(" \t,;:")
+    return premise or None
 
-    causal_premise = text[sentence_start:anchor_start].strip(" \t,;:")
-    if not causal_premise:
+
+def _causal_sentence_span(
+    text: str,
+    match: re.Match[str],
+) -> tuple[int, int, str] | None:
+    """Keep a mechanically justified source premise and conclusion as one span."""
+
+    answer_span = _validated_match_span(text, match)
+    if answer_span is None:
+        return None
+    _, answer_end, _ = answer_span
+    premise = _causal_premise(text, match)
+    if premise is None:
+        return None
+
+    anchor_start = match.start("anchor")
+    sentence_start = anchor_start - len(text[:anchor_start].split(premise, 1)[-1]) - len(premise)
+    if sentence_start < 0 or text[sentence_start:anchor_start].strip(" \t,;:") != premise:
+        sentence_start = text.rfind(premise, 0, anchor_start)
+    if sentence_start < 0:
         return None
 
     start = sentence_start
+    while start < anchor_start and text[start].isspace():
+        start += 1
     end = answer_end
     while end > start and text[end - 1].isspace():
         end -= 1
