@@ -114,7 +114,11 @@ class _DualProviderClassificationGate:
         if primary.score >= self.pass_threshold:
             return self._finalize_high_band(primary, candidate, context, primary_evidence)
 
-        if primary.score < self.verify_threshold:
+        if primary.score < self.verify_threshold and not self._should_verify_below_threshold(
+            primary,
+            candidate,
+            context,
+        ):
             return self._result(
                 context,
                 verdict=GateVerdict.REJECT,
@@ -201,7 +205,11 @@ class _DualProviderClassificationGate:
                 evidence_payload=evidence_payload,
             )
 
-        consensus_verdict, consensus_reason = self._verified_positive_outcome(context)
+        consensus_verdict, consensus_reason = self._verified_positive_outcome(
+            context,
+            primary,
+            verifier,
+        )
         return self._result(
             context,
             verdict=consensus_verdict,
@@ -210,8 +218,22 @@ class _DualProviderClassificationGate:
             evidence_payload=evidence_payload,
         )
 
-    def _verified_positive_outcome(self, context: GateContext) -> tuple[GateVerdict, str]:
-        del context
+    def _should_verify_below_threshold(
+        self,
+        primary: ModelDecision,
+        candidate: NormalizedQA,
+        context: GateContext,
+    ) -> bool:
+        del primary, candidate, context
+        return False
+
+    def _verified_positive_outcome(
+        self,
+        context: GateContext,
+        primary: ModelDecision,
+        verifier: ModelDecision,
+    ) -> tuple[GateVerdict, str]:
+        del context, primary, verifier
         return GateVerdict.VERIFY, self.verify_reason
 
     def _finalize_high_band(
@@ -331,10 +353,16 @@ class UniversityStemGate(_DualProviderClassificationGate):
     verify_reason = "UNIVERSITY_STEM_REVIEW_REQUIRED"
     consensus_pass_config_versions = frozenset({"task16-recertification-v2"})
 
-    def _verified_positive_outcome(self, context: GateContext) -> tuple[GateVerdict, str]:
+    def _verified_positive_outcome(
+        self,
+        context: GateContext,
+        primary: ModelDecision,
+        verifier: ModelDecision,
+    ) -> tuple[GateVerdict, str]:
+        del primary, verifier
         if context.config_version in self.consensus_pass_config_versions:
             return GateVerdict.PASS, self.pass_reason
-        return super()._verified_positive_outcome(context)
+        return GateVerdict.VERIFY, self.verify_reason
 
 
 class ProblemGate(_DualProviderClassificationGate):
@@ -351,6 +379,35 @@ class ProblemGate(_DualProviderClassificationGate):
     uncertain_reason = "PROBLEM_TYPE_UNCERTAIN"
     pass_reason = "PROBLEM_CONFIRMED"
     verify_reason = "PROBLEM_REVIEW_REQUIRED"
+    recall_config_versions = frozenset({"task16-recertification-v2"})
+    recall_verify_floor = 0.80
+
+    def _should_verify_below_threshold(
+        self,
+        primary: ModelDecision,
+        candidate: NormalizedQA,
+        context: GateContext,
+    ) -> bool:
+        return (
+            context.config_version in self.recall_config_versions
+            and primary.score >= self.recall_verify_floor
+            and primary.label in self.positive_labels
+            and self._has_positive_evidence(primary, candidate)
+        )
+
+    def _verified_positive_outcome(
+        self,
+        context: GateContext,
+        primary: ModelDecision,
+        verifier: ModelDecision,
+    ) -> tuple[GateVerdict, str]:
+        del primary
+        if (
+            context.config_version in self.recall_config_versions
+            and verifier.score >= self.pass_threshold
+        ):
+            return GateVerdict.PASS, self.pass_reason
+        return GateVerdict.VERIFY, self.verify_reason
 
     def _has_positive_evidence(
         self,
