@@ -13,7 +13,8 @@ from college_builder.domain.source import JsonValue, NormalizedQA
 from college_builder.quality.engine import GateContext, GateResultEvidence
 
 _CONCLUSION_RE = re.compile(
-    r"(?is)(?:therefore|thus|hence|\bso\b|final\s+answer\s*[:：]|answer\s*[:：]|因此|所以|故)"
+    r"(?is)(?P<anchor>therefore|thus|hence|\bso\b|final\s+answer\s*[:：]|"
+    r"answer\s*[:：]|因此|所以|故)"
     r"\s*[,;:]?\s*(?P<answer>[^\n]+?)\s*$"
 )
 _TERMINAL_MATH_RE = re.compile(
@@ -28,6 +29,12 @@ _WKB_CONDITION_RE = re.compile(
     r"(?is)\bThen\s+you\s+get\s*\n?\s*(?P<answer>\$\$[^\n]+\$\$)\s*\n\s*"
     r"which\s+is\s+a\s+typical\s+WKB\s+quantization\s+integral\b"
 )
+_EXPLANATORY_QUESTION_RE = re.compile(
+    r"(?is)(?:^\s*why\b|^\s*how\s+come\b|^\s*explain\b|\bexplain\s+why\b|"
+    r"\breason\s+(?:for|why)\b|为什么|为何|解释|说明.{0,12}原因)"
+)
+_SENTENCE_BOUNDARY_RE = re.compile(r"[.!?。！？](?:\s+|$)")
+_CAUSAL_ANCHORS = frozenset({"therefore", "thus", "hence", "so", "因此", "所以", "故"})
 _REFERENTIAL_ANSWER_RE = re.compile(
     r"(?is)(?:\b(?:shown|given|stated)\s+above\b|\b(?:see|refer\s+to)\b|"
     r"(?:如上|上述|上面|见上))"
@@ -99,7 +106,7 @@ def extract_source_answer(candidate: NormalizedQA) -> AnswerExtraction:
             )
 
     analysis_text = candidate.analysis
-    analysis_span = _conclusion_span(analysis_text)
+    analysis_span = _conclusion_span(analysis_text, candidate.question)
     if analysis_span is None:
         analysis_span = _named_formula_span(analysis_text)
     if analysis_span is None:
@@ -224,13 +231,58 @@ def _trimmed_span(text: str) -> tuple[int, int, str] | None:
     return start, end, text[start:end]
 
 
-def _conclusion_span(text: str) -> tuple[int, int, str] | None:
+def _conclusion_span(text: str, question: str) -> tuple[int, int, str] | None:
     if not text.strip():
         return None
     match = _CONCLUSION_RE.search(text)
     if match is None:
         return None
+    if _requires_explanatory_answer(question) and _is_causal_anchor(match.group("anchor")):
+        return _causal_sentence_span(text, match)
     return _validated_match_span(text, match)
+
+
+def _requires_explanatory_answer(question: str) -> bool:
+    return _EXPLANATORY_QUESTION_RE.search(question) is not None
+
+
+def _is_causal_anchor(anchor: str) -> bool:
+    normalized = anchor.strip().lower().rstrip(":：")
+    return normalized in _CAUSAL_ANCHORS
+
+
+def _causal_sentence_span(
+    text: str,
+    match: re.Match[str],
+) -> tuple[int, int, str] | None:
+    """Keep source cause + conclusion together for explanatory questions."""
+
+    answer_span = _validated_match_span(text, match)
+    if answer_span is None:
+        return None
+    _, answer_end, _ = answer_span
+    anchor_start = match.start("anchor")
+
+    sentence_start = 0
+    for boundary in _SENTENCE_BOUNDARY_RE.finditer(text, 0, anchor_start):
+        sentence_start = boundary.end()
+    while sentence_start < anchor_start and text[sentence_start].isspace():
+        sentence_start += 1
+
+    causal_premise = text[sentence_start:anchor_start].strip(" \t,;:")
+    if not causal_premise:
+        return None
+
+    start = sentence_start
+    end = answer_end
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    if start >= end:
+        return None
+    answer = text[start:end]
+    if answer in _PLACEHOLDERS or _REFERENTIAL_ANSWER_RE.search(answer):
+        return None
+    return start, end, answer
 
 
 def _named_formula_span(text: str) -> tuple[int, int, str] | None:
