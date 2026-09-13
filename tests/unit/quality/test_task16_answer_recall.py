@@ -95,6 +95,57 @@ def test_gate3_preserves_complete_causal_answer_for_why_question() -> None:
     assert extraction.source_span == f"analysis:0:{len(analysis)}"
 
 
+def test_gate3_preserves_complete_causal_answer_for_explain_why_question() -> None:
+    question = "Explain why the gas temperature rises during compression."
+    analysis = "Compression increases molecular collision frequency, therefore temperature rises."
+
+    extraction = extract_source_answer(_candidate(analysis, question=question))
+
+    assert extraction.final_answer == analysis
+    assert extraction.source_field == "analysis"
+    assert extraction.start_offset == 0
+    assert extraction.end_offset == len(analysis)
+
+
+def test_gate3_generic_explain_preserves_mechanically_explicit_causal_premise() -> None:
+    question = "Explain the observed temperature increase."
+    analysis = (
+        "The gas is compressed because external work raises its internal energy, "
+        "therefore the temperature increases."
+    )
+
+    extraction = extract_source_answer(_candidate(analysis, question=question))
+
+    assert extraction.final_answer == analysis
+    assert extraction.source_field == "analysis"
+    assert extraction.start_offset == 0
+    assert extraction.end_offset == len(analysis)
+
+
+def test_gate3_generic_explain_keeps_self_contained_formal_result() -> None:
+    question = "Explain the result."
+    analysis = "Substituting the boundary values cancels the remaining terms; therefore 4"
+
+    extraction = extract_source_answer(_candidate(analysis, question=question))
+
+    assert extraction.final_answer == "4"
+    assert extraction.source_field == "analysis"
+    assert extraction.start_offset == analysis.rindex("4")
+    assert extraction.end_offset == len(analysis)
+
+
+def test_gate3_calculation_keeps_terminal_formal_result() -> None:
+    question = "Calculate x."
+    analysis = "Subtracting 3 from both sides and dividing by 2. Therefore x = 4"
+
+    extraction = extract_source_answer(_candidate(analysis, question=question))
+
+    assert extraction.final_answer == "x = 4"
+    assert extraction.source_field == "analysis"
+    assert extraction.start_offset == analysis.rindex("x = 4")
+    assert extraction.end_offset == len(analysis)
+
+
 def test_gate3_does_not_derive_answer_when_terminal_source_text_is_absent() -> None:
     analysis = "Solving 2x + 3 = 11 requires isolating x by ordinary algebra."
 
