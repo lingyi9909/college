@@ -22,7 +22,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "05b27ee97bb528f0cb4bd0af8e5746a3424a0414" || true
           python - <<'PY'
           import json
           from pathlib import Path
@@ -49,6 +48,7 @@ jobs:
           assert manifest['total'] == 50000
           assert len(manifest['record_ids']) == 50000
           assert len(manifest['raw_sha256']) == 50000
+          assert len(set(manifest['record_ids'])) == 50000
           assert hashlib.sha256(payload).hexdigest() == manifest['sample_payload_sha256']
           assert manifest['strata']['stackmathqa'] == {
               'math': 20000,
@@ -57,6 +57,7 @@ jobs:
               'physics': 10000,
           }
           assert manifest['strata']['openstax'] == 5000
+          assert manifest['openstax']['identity_contract'] == 'immutable_revision+row_offset+native_id'
           print('TASK16C_50K_SAMPLE_GUARD=PASS')
           PY
       - uses: actions/upload-artifact@v4
