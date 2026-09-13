@@ -18,3 +18,4 @@ jobs:
           python-version: '3.12'
       - name: Diagnose immutable OpenStax snapshot identities
         run: python ci/task16c_openstax_identity_diag.py
+      # diagnostic-only workflow; no model calls
