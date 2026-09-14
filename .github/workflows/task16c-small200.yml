@@ -1,7 +1,8 @@
 name: Task16C Small-200 Real-Model Validation
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ci/task16c-small200]
 
 permissions:
   contents: read
