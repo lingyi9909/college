@@ -156,6 +156,7 @@ def test_alignment_pass_requires_same_question_answer_and_analysis_support() -> 
         "question": candidate.question,
         "answer": candidate.answer,
         "analysis": candidate.analysis,
+        "answer_source_reference": f"answer:0-{len(candidate.answer)}",
     }
 
 
@@ -327,6 +328,7 @@ def test_correctness_request_contains_only_source_content() -> None:
         "question": candidate.question,
         "answer": candidate.answer,
         "analysis": candidate.analysis,
+        "answer_source_reference": f"answer:0-{len(candidate.answer)}",
     }
     assert "generated_solution" not in request.inputs
 
