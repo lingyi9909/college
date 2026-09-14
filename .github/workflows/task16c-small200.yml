@@ -1,8 +1,7 @@
 name: Task16C Small-200 Real-Model Validation
 
 on:
-  push:
-    branches: [ci/task16c-small200]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,14 +14,14 @@ jobs:
     env:
       OPENAI_COMPATIBLE_BASE_URL: ${{ secrets.TASK15_OPENAI_BASE_URL }}
       OPENAI_COMPATIBLE_API_KEY: ${{ secrets.TASK15_OPENAI_API_KEY }}
-      TASK16C_PRODUCTION_SHA: c65c70c5ff007142bdfbc61857d2990f49495d7d
+      TASK16C_PRODUCTION_SHA: 01f453ef241659e673ddcb1e012f1f270f3316dc
     steps:
       - uses: actions/checkout@v4
         with:
           path: ci-source
       - uses: actions/checkout@v4
         with:
-          ref: c65c70c5ff007142bdfbc61857d2990f49495d7d
+          ref: 01f453ef241659e673ddcb1e012f1f270f3316dc
           path: work
       - uses: actions/setup-python@v5
         with:
@@ -68,6 +67,7 @@ jobs:
           tests/unit/quality/test_task16_task15_answer_evidence.py
           tests/unit/quality/test_task16a3_analysis_evidence_relevance.py
           tests/unit/quality/test_task16a4_downstream_span_protocol.py
+          tests/unit/quality/test_task16c_small200_authority_hint.py
           tests/e2e/test_task15_provider_prompt_protocol.py
           tests/e2e/test_gold_regression.py
 
@@ -125,7 +125,7 @@ jobs:
           import json
           from pathlib import Path
           r = json.loads(Path('/tmp/task16c-small200-certification/run_report.json').read_text(encoding='utf-8'))
-          assert r['exact_production_code_sha'] == 'c65c70c5ff007142bdfbc61857d2990f49495d7d'
+          assert r['exact_production_code_sha'] == '01f453ef241659e673ddcb1e012f1f270f3316dc'
           assert r['sample']['count'] == 200
           assert r['sample']['selection_frozen_before_model_calls'] is True
           assert all(r['engineering_gate'].values())
