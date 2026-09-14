@@ -197,7 +197,7 @@ def to_final_record(ir: UniversityQuestionIR) -> FinalQuestionRecord:
         "source_dataset": ir.provenance.source_dataset,
         "source_id": ir.provenance.source_id,
         "source_url": ir.provenance.source_url or "",
-        "source_license": "UNKNOWN",
+        "source_license": ir.provenance.source_license,
         "source_question_hash": _sha256(ir.question.raw),
         "source_answer_hash": _sha256(source_answer_text),
         "pipeline_version": PIPELINE_VERSION,

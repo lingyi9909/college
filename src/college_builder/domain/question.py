@@ -110,6 +110,7 @@ class QuestionProvenance(DomainModel):
     source_dataset: NonEmptyStr
     source_id: NonEmptyStr
     source_url: str | None = None
+    source_license: NonEmptyStr = "UNKNOWN"
     raw_sha256: Sha256Hex
 
 

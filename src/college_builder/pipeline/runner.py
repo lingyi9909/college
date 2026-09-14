@@ -1239,6 +1239,7 @@ class PipelineRunner:
                 source_dataset=raw.source_dataset,
                 source_id=raw.source_id,
                 source_url=raw.source_url,
+                source_license=_source_license(raw),
                 raw_sha256=raw.raw_sha256,
             ),
             dedup=DedupState(
@@ -1891,3 +1892,10 @@ def _atomic_write_text(path: Path, payload: str) -> None:
     temp = path.with_name(f".{path.name}.tmp")
     temp.write_text(payload, encoding="utf-8", newline="\n")
     temp.replace(path)
+
+
+def _source_license(raw: RawSourceRecord) -> str:
+    value = raw.license_metadata.get("license")
+    if isinstance(value, str) and value.strip():
+        return value
+    return "UNKNOWN"
