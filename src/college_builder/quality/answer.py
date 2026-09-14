@@ -33,7 +33,8 @@ _WKB_CONDITION_RE = re.compile(
     r"which\s+is\s+a\s+typical\s+WKB\s+quantization\s+integral\b"
 )
 _EXPLICIT_CAUSAL_QUESTION_RE = re.compile(
-    r"(?is)(?:^\s*why\b|^\s*how\s+come\b|\bexplain\s+why\b|"
+    r"(?is)(?:^\s*why\b|[.!?。！？]\s*why\b|"
+    r"^\s*how\s+come\b|[.!?。！？]\s*how\s+come\b|\bexplain\s+why\b|"
     r"\breason\s+(?:for|why)\b|\bwhat\s+causes?\b|"
     r"为什么|为何|解释.{0,12}(?:为什么|为何|原因)|说明.{0,12}原因)"
 )
