@@ -1,0 +1,76 @@
+name: Task16C4 Apply Fix
+
+on:
+  push:
+    branches: [feature/task16c4-license-provenance]
+    paths:
+      - .github/workflows/task16c4-apply-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply minimal license provenance fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected exactly one match in {path}, found {count}")
+              file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              "src/college_builder/domain/question.py",
+              """class QuestionProvenance(DomainModel):\n    source_dataset: NonEmptyStr\n    source_id: NonEmptyStr\n    source_url: str | None = None\n    raw_sha256: Sha256Hex\n""",
+              """class QuestionProvenance(DomainModel):\n    source_dataset: NonEmptyStr\n    source_id: NonEmptyStr\n    source_url: str | None = None\n    source_license: NonEmptyStr = \"UNKNOWN\"\n    raw_sha256: Sha256Hex\n""",
+          )
+
+          replace_once(
+              "src/college_builder/pipeline/runner.py",
+              """            provenance=QuestionProvenance(\n                source_dataset=raw.source_dataset,\n                source_id=raw.source_id,\n                source_url=raw.source_url,\n                raw_sha256=raw.raw_sha256,\n            ),\n""",
+              """            provenance=QuestionProvenance(\n                source_dataset=raw.source_dataset,\n                source_id=raw.source_id,\n                source_url=raw.source_url,\n                source_license=_source_license(raw),\n                raw_sha256=raw.raw_sha256,\n            ),\n""",
+          )
+
+          replace_once(
+              "src/college_builder/export/profile.py",
+              '        "source_license": "UNKNOWN",\n',
+              '        "source_license": ir.provenance.source_license,\n',
+          )
+
+          runner = Path("src/college_builder/pipeline/runner.py")
+          runner_text = runner.read_text(encoding="utf-8")
+          if "def _source_license(raw: RawSourceRecord) -> str:" in runner_text:
+              raise SystemExit("_source_license helper already exists unexpectedly")
+          runner.write_text(
+              runner_text.rstrip()
+              + "\n\n\ndef _source_license(raw: RawSourceRecord) -> str:\n"
+              + "    value = raw.license_metadata.get(\"license\")\n"
+              + "    if isinstance(value, str) and value.strip():\n"
+              + "        return value\n"
+              + "    return \"UNKNOWN\"\n",
+              encoding="utf-8",
+          )
+          PY
+      - name: Commit production fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/college_builder/domain/question.py src/college_builder/pipeline/runner.py src/college_builder/export/profile.py
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "No production changes produced" >&2
+            exit 1
+          fi
+          git commit -m "fix: preserve source license provenance"
+          git push origin HEAD:feature/task16c4-license-provenance
