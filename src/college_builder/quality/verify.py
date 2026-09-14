@@ -196,7 +196,9 @@ class AlignmentGate:
                 evidence_payload={"answer_authority": authority_payload},
             )
 
-        request = _verification_request(self.name, self.prompt, candidate, final_answer)
+        request = _verification_request(
+            self.name, self.prompt, candidate, final_answer, extraction
+        )
         decision, error = _call_and_validate(self.provider_impl, request)
         if error is not None:
             error_payload = dict(error.payload)
@@ -350,7 +352,9 @@ class CorrectnessVerifier:
                 },
             )
 
-        request = _verification_request(self.name, self.prompt, candidate, final_answer)
+        request = _verification_request(
+            self.name, self.prompt, candidate, final_answer, extraction
+        )
         decision, error = _call_and_validate(self.provider_impl, request)
         if error is not None:
             error_payload = dict(error.payload)
@@ -532,6 +536,7 @@ def _verification_request(
     prompt: str,
     candidate: NormalizedQA,
     final_answer: str,
+    extraction: AnswerExtraction,
 ) -> ModelClassificationRequest:
     return ModelClassificationRequest(
         task=task,
@@ -540,9 +545,22 @@ def _verification_request(
             "question": candidate.question,
             "answer": final_answer,
             "analysis": candidate.analysis,
+            "answer_source_reference": _answer_source_reference(extraction, final_answer),
         },
         allowed_labels=VERIFICATION_LABELS,
     )
+
+
+def _answer_source_reference(extraction: AnswerExtraction, final_answer: str) -> str:
+    if extraction.source_field == "answer":
+        return f"answer:0-{len(final_answer)}"
+    if (
+        extraction.source_field == "analysis"
+        and extraction.start_offset is not None
+        and extraction.end_offset is not None
+    ):
+        return f"analysis:{extraction.start_offset}-{extraction.end_offset}"
+    raise ValueError("formal answer authority requires an exact source reference")
 
 
 def _provider_identity(provider: StructuredModelProvider) -> tuple[str, str]:

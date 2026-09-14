@@ -26,8 +26,9 @@ Evidence reference protocol:
    - if answer is "4", answer:0-1 cites exactly "4";
    - if analysis begins with "Since", analysis:0-5 cites exactly "Since".
 6. Do not use 1-based indexing or an inclusive end index. Do not emit quoted source text, XML/HTML tags, line numbers, negative indexes, reversed ranges, out-of-range offsets, or references to fields other than question, answer, and analysis.
-7. For PASS, cite at least one real non-empty valid span from each of question, answer, and analysis. The answer evidence must cover the source answer authority required by the validator.
-8. If you cannot identify valid source spans under this exact protocol, return FAIL or UNCERTAIN rather than guessing or repairing offsets.
+7. The request includes `answer_source_reference`, a validator-supplied exact source reference for the formal answer authority. It points to either the projected answer field or the exact original analysis span from which that answer was extracted.
+8. For PASS, copy it exactly into evidence_references. Also cite at least one real non-empty valid span from each of question, answer, and analysis; `answer_source_reference` does not waive those coverage requirements.
+9. If you cannot identify the other required valid source spans under this exact protocol, return FAIL or UNCERTAIN rather than guessing or repairing offsets.
 
 Never generate, rewrite, correct, supplement, summarize, repair, or return any replacement question, answer, analysis, solution, derivation, code, or explanation. Never generate evidence text that is not present in the provided source fields. The source question/answer/analysis are immutable training-data candidates. Your output is classification evidence only.
 
