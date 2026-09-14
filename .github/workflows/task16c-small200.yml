@@ -15,14 +15,14 @@ jobs:
     env:
       OPENAI_COMPATIBLE_BASE_URL: ${{ secrets.TASK15_OPENAI_BASE_URL }}
       OPENAI_COMPATIBLE_API_KEY: ${{ secrets.TASK15_OPENAI_API_KEY }}
-      TASK16C_PRODUCTION_SHA: 29edefee42b7fe6734b3d840d5dd981bf9282cc1
+      TASK16C_PRODUCTION_SHA: c65c70c5ff007142bdfbc61857d2990f49495d7d
     steps:
       - uses: actions/checkout@v4
         with:
           path: ci-source
       - uses: actions/checkout@v4
         with:
-          ref: 29edefee42b7fe6734b3d840d5dd981bf9282cc1
+          ref: c65c70c5ff007142bdfbc61857d2990f49495d7d
           path: work
       - uses: actions/setup-python@v5
         with:
@@ -125,7 +125,7 @@ jobs:
           import json
           from pathlib import Path
           r = json.loads(Path('/tmp/task16c-small200-certification/run_report.json').read_text(encoding='utf-8'))
-          assert r['exact_production_code_sha'] == '29edefee42b7fe6734b3d840d5dd981bf9282cc1'
+          assert r['exact_production_code_sha'] == 'c65c70c5ff007142bdfbc61857d2990f49495d7d'
           assert r['sample']['count'] == 200
           assert r['sample']['selection_frozen_before_model_calls'] is True
           assert all(r['engineering_gate'].values())
