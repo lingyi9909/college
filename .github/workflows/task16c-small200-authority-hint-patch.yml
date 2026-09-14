@@ -1,0 +1,62 @@
+name: Task16C Small-200 Authority Hint Patch
+
+on:
+  push:
+    branches: [hotfix/task16c-small200-authority-hint]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply minimal authority-reference request and prompt fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          verify = Path('src/college_builder/quality/verify.py')
+          text = verify.read_text(encoding='utf-8')
+          old_call = 'request = _verification_request(self.name, self.prompt, candidate, final_answer)'
+          new_call = 'request = _verification_request(\n            self.name, self.prompt, candidate, final_answer, extraction\n        )'
+          if text.count(old_call) == 2:
+              text = text.replace(old_call, new_call)
+          elif text.count(new_call) != 2:
+              raise SystemExit('unexpected verification request call shape')
+
+          old_fn = '''def _verification_request(\n    task: str,\n    prompt: str,\n    candidate: NormalizedQA,\n    final_answer: str,\n) -> ModelClassificationRequest:\n    return ModelClassificationRequest(\n        task=task,\n        prompt=prompt,\n        inputs={\n            "question": candidate.question,\n            "answer": final_answer,\n            "analysis": candidate.analysis,\n        },\n        allowed_labels=VERIFICATION_LABELS,\n    )\n'''
+          new_fn = '''def _verification_request(\n    task: str,\n    prompt: str,\n    candidate: NormalizedQA,\n    final_answer: str,\n    extraction: AnswerExtraction,\n) -> ModelClassificationRequest:\n    return ModelClassificationRequest(\n        task=task,\n        prompt=prompt,\n        inputs={\n            "question": candidate.question,\n            "answer": final_answer,\n            "analysis": candidate.analysis,\n            "answer_source_reference": _answer_source_reference(extraction, final_answer),\n        },\n        allowed_labels=VERIFICATION_LABELS,\n    )\n\n\ndef _answer_source_reference(extraction: AnswerExtraction, final_answer: str) -> str:\n    if extraction.source_field == "answer":\n        return f"answer:0-{len(final_answer)}"\n    if (\n        extraction.source_field == "analysis"\n        and extraction.start_offset is not None\n        and extraction.end_offset is not None\n    ):\n        return f"analysis:{extraction.start_offset}-{extraction.end_offset}"\n    raise ValueError("formal answer authority requires an exact source reference")\n'''
+          if old_fn in text:
+              text = text.replace(old_fn, new_fn, 1)
+          elif new_fn not in text:
+              raise SystemExit('unexpected _verification_request shape')
+          verify.write_text(text, encoding='utf-8')
+
+          old_rules = '''7. For PASS, cite at least one real non-empty valid span from each of question, answer, and analysis. The answer evidence must cover the source answer authority required by the validator.\n8. If you cannot identify valid source spans under this exact protocol, return FAIL or UNCERTAIN rather than guessing or repairing offsets.\n'''
+          new_rules = '''7. The request includes `answer_source_reference`, a validator-supplied exact source reference for the formal answer authority. It points to either the projected answer field or the exact original analysis span from which that answer was extracted.\n8. For PASS, copy it exactly into evidence_references. Also cite at least one real non-empty valid span from each of question, answer, and analysis; `answer_source_reference` does not waive those coverage requirements.\n9. If you cannot identify the other required valid source spans under this exact protocol, return FAIL or UNCERTAIN rather than guessing or repairing offsets.\n'''
+          for prompt_path in (
+              Path('prompts/qa_alignment/v2.txt'),
+              Path('prompts/correctness_verify/v2.txt'),
+          ):
+              prompt = prompt_path.read_text(encoding='utf-8')
+              if old_rules in prompt:
+                  prompt = prompt.replace(old_rules, new_rules, 1)
+              elif new_rules not in prompt:
+                  raise SystemExit(f'unexpected prompt protocol in {prompt_path}')
+              prompt_path.write_text(prompt, encoding='utf-8')
+          PY
+          if git diff --quiet; then
+            echo NO_CHANGES
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/college_builder/quality/verify.py prompts/qa_alignment/v2.txt prompts/correctness_verify/v2.txt
+          git commit -m "fix: expose exact answer authority to Gate5 verifiers"
+          git push origin HEAD:hotfix/task16c-small200-authority-hint
