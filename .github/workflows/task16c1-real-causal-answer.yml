@@ -1,0 +1,27 @@
+name: Task16C1 Real Causal Answer Hotfix
+
+on:
+  push:
+    branches: [hotfix/task16c1-real-causal-answer]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Focused Gate3 causal-answer regression
+        run: pytest -q tests/unit/quality/test_task16_answer_recall.py
+      - name: Full pytest
+        run: pytest -q
+      - name: Ruff
+        run: ruff check src tests
+      - name: MyPy
+        run: mypy src
