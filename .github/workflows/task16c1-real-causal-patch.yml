@@ -1,0 +1,43 @@
+name: Task16C1 Real Causal Answer Patch
+
+on:
+  push:
+    branches: [hotfix/task16c1-real-causal-answer]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply minimal causal-question boundary fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/college_builder/quality/answer.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''_EXPLICIT_CAUSAL_QUESTION_RE = re.compile(\n    r"(?is)(?:^\\s*why\\b|^\\s*how\\s+come\\b|\\bexplain\\s+why\\b|"\n    r"\\breason\\s+(?:for|why)\\b|\\bwhat\\s+causes?\\b|"\n'''
+          new = '''_EXPLICIT_CAUSAL_QUESTION_RE = re.compile(\n    r"(?is)(?:^\\s*why\\b|[.!?。！？]\\s*why\\b|"\n    r"^\\s*how\\s+come\\b|[.!?。！？]\\s*how\\s+come\\b|\\bexplain\\s+why\\b|"\n    r"\\breason\\s+(?:for|why)\\b|\\bwhat\\s+causes?\\b|"\n'''
+          if new in text:
+              print('PATCH_ALREADY_APPLIED')
+              raise SystemExit(0)
+          if old not in text:
+              raise SystemExit('expected causal-question regex not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          print('PATCH_APPLIED')
+          PY
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/college_builder/quality/answer.py
+          git commit -m "fix: preserve causal answers after question context"
+          git push origin HEAD:hotfix/task16c1-real-causal-answer
