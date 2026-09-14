@@ -95,6 +95,22 @@ def test_gate3_preserves_complete_causal_answer_for_why_question() -> None:
     assert extraction.source_span == f"analysis:0:{len(analysis)}"
 
 
+def test_gate3_preserves_complete_causal_answer_for_context_prefixed_why_question() -> None:
+    question = (
+        "Geometric optics describes image formation with rays. "
+        "Why is it correct to use geometric optics to analyze a microscope's image?"
+    )
+    analysis = "Microscopes create images of macroscopic size, so geometric optics applies."
+
+    extraction = extract_source_answer(_candidate(analysis, question=question))
+
+    assert extraction.final_answer == analysis
+    assert extraction.source_field == "analysis"
+    assert extraction.start_offset == 0
+    assert extraction.end_offset == len(analysis)
+    assert extraction.source_span == f"analysis:0:{len(analysis)}"
+
+
 def test_gate3_preserves_complete_causal_answer_for_explain_why_question() -> None:
     question = "Explain why the gas temperature rises during compression."
     analysis = "Compression increases molecular collision frequency, therefore temperature rises."
