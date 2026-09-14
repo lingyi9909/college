@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-CODE_SHA = "c65c70c5ff007142bdfbc61857d2990f49495d7d"
+CODE_SHA = "01f453ef241659e673ddcb1e012f1f270f3316dc"
 CONFIG_PATH = Path("config/task16-recertification.yaml")
 SAMPLE_DIR = Path("/tmp/task16c-small200")
 SAMPLE = SAMPLE_DIR / "sample.jsonl"
