@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-CODE_SHA = "01f453ef241659e673ddcb1e012f1f270f3316dc"
+CODE_SHA = "91f4115c82bbe0ae05b5b5545d84cf3102145e0a"
 COUNT = 20
 CONFIG_PATH = Path("config/task16-recertification.yaml")
 SAMPLE_DIR = Path("/tmp/task16c-small200")
@@ -82,6 +82,8 @@ def main() -> None:
     assert config["config_version"] == "task16-recertification-v2"
     assert config["providers"]["classifier"]["model"] == "deepseek-flash"
     assert config["providers"]["verifier"]["model"] == "deepseek-v4-pro"
+    assert config["prompt_versions"]["qa_alignment"] == "v3"
+    assert config["prompt_versions"]["correctness_verify"] == "v3"
 
     reject_reasons: Counter[str] = Counter()
     accepted_ids: list[str] = []
@@ -91,6 +93,10 @@ def main() -> None:
         else:
             reason = audit.get("reject_reason")
             reject_reasons[str(reason) if reason else "REJECTED_WITHOUT_REASON"] += 1
+
+    prompt_sha256: dict[str, str] = {}
+    for task, version in config["prompt_versions"].items():
+        prompt_sha256[task] = _sha256(Path("prompts") / task / f"{version}.txt")
 
     report = {
         "certification": "Task16C fixed Small-20 regression validation",
@@ -111,6 +117,7 @@ def main() -> None:
             "classifier": config["providers"]["classifier"],
             "verifier": config["providers"]["verifier"],
             "prompt_versions": config["prompt_versions"],
+            "prompt_sha256": prompt_sha256,
         },
         "pipeline": {
             "run_id": pipeline_report["run_id"],

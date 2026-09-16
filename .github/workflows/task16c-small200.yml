@@ -15,14 +15,14 @@ jobs:
     env:
       OPENAI_COMPATIBLE_BASE_URL: ${{ secrets.TASK15_OPENAI_BASE_URL }}
       OPENAI_COMPATIBLE_API_KEY: ${{ secrets.TASK15_OPENAI_API_KEY }}
-      TASK16C_PRODUCTION_SHA: 01f453ef241659e673ddcb1e012f1f270f3316dc
+      TASK16C_PRODUCTION_SHA: 91f4115c82bbe0ae05b5b5545d84cf3102145e0a
     steps:
       - uses: actions/checkout@v4
         with:
           path: ci-source
       - uses: actions/checkout@v4
         with:
-          ref: 01f453ef241659e673ddcb1e012f1f270f3316dc
+          ref: 91f4115c82bbe0ae05b5b5545d84cf3102145e0a
           path: work
       - uses: actions/setup-python@v5
         with:
@@ -40,6 +40,17 @@ jobs:
           test "$(git rev-parse HEAD)" = "$TASK16C_PRODUCTION_SHA"
           test -n "$OPENAI_COMPATIBLE_BASE_URL"
           test -n "$OPENAI_COMPATIBLE_API_KEY"
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          config = yaml.safe_load(Path('config/task16-recertification.yaml').read_text(encoding='utf-8'))
+          assert config['config_version'] == 'task16-recertification-v2'
+          assert config['prompt_versions']['qa_alignment'] == 'v3'
+          assert config['prompt_versions']['correctness_verify'] == 'v3'
+          assert config['providers']['classifier']['model'] == 'deepseek-flash'
+          assert config['providers']['verifier']['model'] == 'deepseek-v4-pro'
+          print('TASK16C_COMPLETENESS_V3_GUARD=PASS')
+          PY
 
       - name: Pre-model focused regressions
         working-directory: work
@@ -48,6 +59,7 @@ jobs:
           tests/unit/quality/test_task16_answer_recall.py
           tests/unit/quality/test_task16a4_downstream_span_protocol.py
           tests/unit/quality/test_task16c_small200_authority_hint.py
+          tests/unit/quality/test_task16c_small20_false_accepts.py
           tests/e2e/test_task15_provider_prompt_protocol.py
           tests/e2e/test_gold_regression.py
 
@@ -103,7 +115,7 @@ jobs:
           import json
           from pathlib import Path
           r = json.loads(Path('/tmp/task16c-small200-certification/run_report.json').read_text(encoding='utf-8'))
-          assert r['exact_production_code_sha'] == '01f453ef241659e673ddcb1e012f1f270f3316dc'
+          assert r['exact_production_code_sha'] == '91f4115c82bbe0ae05b5b5545d84cf3102145e0a'
           assert r['sample']['count'] == 20
           assert r['sample']['selection_frozen_before_model_calls'] is True
           assert all(r['engineering_gate'].values())
