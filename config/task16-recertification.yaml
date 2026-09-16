@@ -24,8 +24,8 @@ prompt_versions:
   university_classify: v1
   problem_classify: v1
   analysis_classify: v3
-  qa_alignment: v2
-  correctness_verify: v2
+  qa_alignment: v3
+  correctness_verify: v3
 concurrency:
   acquisition: 8
   normalization: 16

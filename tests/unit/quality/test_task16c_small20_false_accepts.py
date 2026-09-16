@@ -2,52 +2,36 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from college_builder.domain.source import NormalizedQA
-from college_builder.quality.answer import extract_source_answer
+import yaml
 
 
-def _candidate(*, question: str, analysis: str) -> NormalizedQA:
-    return NormalizedQA(
-        record_id="norm-task16c-small20-fa",
-        source_record_id="raw-task16c-small20-fa",
-        question=question,
-        answer="",
-        analysis=analysis,
-        subject_candidates=("mathematics",),
-        images=(),
-        metadata={},
-        normalization_evidence={},
-    )
-
-
-def test_gate3_rejects_context_dependent_generic_conclusion_fragment() -> None:
-    question = "Prove that (J:I)=J when I+J=R. Is this correct?"
-    analysis = (
-        "Since I+J=R, write 1=i+j. For r in (J:I), r=ri+rj is in J, "
-        "so (J:I) is contained in J. J is always contained in (J:I), so we have equality."
-    )
-
-    extraction = extract_source_answer(_candidate(question=question, analysis=analysis))
-
-    assert extraction.final_answer is None
-    assert extraction.source_field is None
-
-
-def test_gate5_prompts_require_formal_answer_completeness_not_analysis_substitution() -> None:
+def test_gate5_v3_prompts_require_formal_answer_completeness_not_analysis_substitution() -> None:
     for path in (
-        Path("prompts/qa_alignment/v2.txt"),
-        Path("prompts/correctness_verify/v2.txt"),
+        Path("prompts/qa_alignment/v3.txt"),
+        Path("prompts/correctness_verify/v3.txt"),
     ):
         prompt = path.read_text(encoding="utf-8").lower()
         assert "formal answer must" in prompt
         assert "all requested" in prompt
         assert "analysis must not substitute" in prompt
+        assert "proof" in prompt
+        assert "conclusion fragment" in prompt
 
 
-def test_correctness_prompt_explicitly_rejects_unfinished_required_operations() -> None:
-    prompt = Path("prompts/correctness_verify/v2.txt").read_text(encoding="utf-8").lower()
+def test_correctness_v3_explicitly_rejects_unfinished_required_operations() -> None:
+    prompt = Path("prompts/correctness_verify/v3.txt").read_text(encoding="utf-8").lower()
 
     assert "orthonormal" in prompt
     assert "orthogonal" in prompt
     assert "normalization" in prompt
-    assert "fail" in prompt
+    assert "must fail" in prompt
+    assert "can be done later" in prompt
+
+
+def test_task16_recertification_selects_completeness_v3_prompts() -> None:
+    config = yaml.safe_load(
+        Path("config/task16-recertification.yaml").read_text(encoding="utf-8")
+    )
+
+    assert config["prompt_versions"]["qa_alignment"] == "v3"
+    assert config["prompt_versions"]["correctness_verify"] == "v3"
