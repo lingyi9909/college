@@ -79,8 +79,8 @@ def test_task16_downstream_prompts_define_strict_half_open_span_contract() -> No
     config, alignment, correctness = _downstream_prompts(_TASK16_CONFIG)
 
     assert config.config_version == "task16-recertification-v2"
-    assert config.prompt_versions.qa_alignment == "v2"
-    assert config.prompt_versions.correctness_verify == "v2"
+    assert config.prompt_versions.qa_alignment == "v3"
+    assert config.prompt_versions.correctness_verify == "v3"
     for text in (alignment, correctness):
         lowered = text.lower()
         assert "question:<start>-<end>" in text
@@ -95,6 +95,8 @@ def test_task16_downstream_prompts_define_strict_half_open_span_contract() -> No
         assert "analysis[start:end]" in text
         assert "inclusive end" in lowered
         assert "never generate" in lowered
+        assert "formal answer must" in lowered
+        assert "analysis must not substitute" in lowered
 
 
 def test_task16_config_versions_downstream_without_mutating_task15_identity() -> None:
@@ -108,5 +110,5 @@ def test_task16_config_versions_downstream_without_mutating_task15_identity() ->
 
     assert task16.config_version == "task16-recertification-v2"
     assert task16.prompt_versions.analysis_classify == "v3"
-    assert task16.prompt_versions.qa_alignment == "v2"
-    assert task16.prompt_versions.correctness_verify == "v2"
+    assert task16.prompt_versions.qa_alignment == "v3"
+    assert task16.prompt_versions.correctness_verify == "v3"
