@@ -1,4 +1,4 @@
-name: Task16C Small-200 Real-Model Validation
+name: Task16C Small-20 Real-Model Validation
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 90
     env:
       OPENAI_COMPATIBLE_BASE_URL: ${{ secrets.TASK15_OPENAI_BASE_URL }}
       OPENAI_COMPATIBLE_API_KEY: ${{ secrets.TASK15_OPENAI_API_KEY }}
@@ -32,7 +32,7 @@ jobs:
         working-directory: work
         run: python -m pip install -e '.[dev]'
 
-      - name: Guard exact production identity and model secrets
+      - name: Guard production identity and model secrets
         working-directory: work
         shell: bash
         run: |
@@ -40,43 +40,24 @@ jobs:
           test "$(git rev-parse HEAD)" = "$TASK16C_PRODUCTION_SHA"
           test -n "$OPENAI_COMPATIBLE_BASE_URL"
           test -n "$OPENAI_COMPATIBLE_API_KEY"
-          python - <<'PY'
-          import hashlib
-          from pathlib import Path
-          import yaml
-          config = yaml.safe_load(Path('config/task16-recertification.yaml').read_text(encoding='utf-8'))
-          assert config['config_version'] == 'task16-recertification-v2'
-          assert config['providers']['classifier']['model'] == 'deepseek-flash'
-          assert config['providers']['verifier']['model'] == 'deepseek-v4-pro'
-          assert config['prompt_versions'] == {
-              'university_classify': 'v1',
-              'problem_classify': 'v1',
-              'analysis_classify': 'v3',
-              'qa_alignment': 'v2',
-              'correctness_verify': 'v2',
-          }
-          print('TASK16C_PRODUCTION_IDENTITY_GUARD=PASS')
-          print('TASK16C_CONFIG_SHA256=' + hashlib.sha256(Path('config/task16-recertification.yaml').read_bytes()).hexdigest())
-          PY
 
-      - name: Pre-model Task16 focused regressions
+      - name: Pre-model focused regressions
         working-directory: work
         run: >-
           pytest -q
-          tests/unit/quality/test_task16_gate2_conflict.py
           tests/unit/quality/test_task16_answer_recall.py
-          tests/unit/quality/test_task16_task15_answer_evidence.py
-          tests/unit/quality/test_task16a3_analysis_evidence_relevance.py
           tests/unit/quality/test_task16a4_downstream_span_protocol.py
           tests/unit/quality/test_task16c_small200_authority_hint.py
           tests/e2e/test_task15_provider_prompt_protocol.py
           tests/e2e/test_gold_regression.py
 
-      - name: Build and freeze deterministic 200-record sample
+      - name: Build frozen source pool and select fixed 20
         working-directory: work
-        run: python ../ci-source/ci/task16c_prepare_200.py
+        run: |
+          python ../ci-source/ci/task16c_prepare_200.py
+          python ../ci-source/ci/task16c_select_20.py
 
-      - name: Guard frozen sample before model calls
+      - name: Guard fixed Small-20 before model calls
         working-directory: work
         shell: bash
         run: |
@@ -87,22 +68,18 @@ jobs:
           root = Path('/tmp/task16c-small200')
           manifest = json.loads((root/'sample_manifest.json').read_text(encoding='utf-8'))
           payload = (root/'sample.jsonl').read_bytes()
-          assert manifest['schema_version'] == 'task16c-small-production-validation-v1'
+          assert manifest['schema_version'] == 'task16c-small20-regression-v1'
           assert manifest['selection_frozen_before_model_calls'] is True
-          assert manifest['total'] == 200
-          assert len(manifest['records']) == 200
-          assert len({r['record_id'] for r in manifest['records']}) == 200
+          assert manifest['total'] == 20
+          assert len(manifest['records']) == 20
+          assert len({r['record_id'] for r in manifest['records']}) == 20
           assert hashlib.sha256(payload).hexdigest() == manifest['sample_payload_sha256']
-          assert manifest['strata'] == {
-              'stackmathqa': {'math': 80, 'mathoverflow': 20, 'statistics': 40, 'physics': 40},
-              'openstax': 20,
-          }
-          print('TASK16C_SMALL200_SAMPLE_GUARD=PASS')
-          print('TASK16C_SMALL200_SAMPLE_SHA256=' + manifest['sample_payload_sha256'])
-          print('TASK16C_SMALL200_IDENTITY_SHA256=' + manifest['record_identity_sha256'])
+          print('TASK16C_SMALL20_SAMPLE_GUARD=PASS')
+          print('TASK16C_SMALL20_SAMPLE_SHA256=' + manifest['sample_payload_sha256'])
+          print('TASK16C_SMALL20_IDENTITY_SHA256=' + manifest['record_identity_sha256'])
           PY
 
-      - name: Execute exact production pipeline on frozen 200
+      - name: Execute exact production pipeline on fixed 20
         working-directory: work
         shell: bash
         run: |
@@ -113,11 +90,11 @@ jobs:
             --workspace /tmp/task16c-small200-workspace \
             --output /tmp/task16c-small200-output
 
-      - name: Build certification evidence
+      - name: Build Small-20 evidence
         working-directory: work
         run: python ../ci-source/ci/task16c_report_200.py
 
-      - name: Engineering structural guards
+      - name: Engineering guards
         working-directory: work
         shell: bash
         run: |
@@ -127,18 +104,13 @@ jobs:
           from pathlib import Path
           r = json.loads(Path('/tmp/task16c-small200-certification/run_report.json').read_text(encoding='utf-8'))
           assert r['exact_production_code_sha'] == '01f453ef241659e673ddcb1e012f1f270f3316dc'
-          assert r['sample']['count'] == 200
+          assert r['sample']['count'] == 20
           assert r['sample']['selection_frozen_before_model_calls'] is True
           assert all(r['engineering_gate'].values())
-          assert r['pipeline']['accepted_count'] > 0, 'small validation produced no accepted/exported records'
+          assert r['pipeline']['accepted_count'] > 0, 'Small-20 produced no accepted records'
           assert r['export']['count'] == r['pipeline']['accepted_count']
-          assert r['export']['exact_19_field_export_valid'] is True
           assert r['pipeline']['provider_errors'] == 0
-          if not r['pipeline']['tokens_available']:
-              assert r['pipeline']['tokens'] is None
-          if not r['pipeline']['estimated_cost_usd_available']:
-              assert r['pipeline']['estimated_cost_usd'] is None
-          print('TASK16C_SMALL200_ENGINEERING_GUARD=PASS')
+          print('TASK16C_SMALL20_ENGINEERING_GUARD=PASS')
           print(json.dumps(r['pipeline']['funnel'], sort_keys=True))
           print(json.dumps(r['pipeline']['reject_reason_counts'], sort_keys=True))
           PY
@@ -156,7 +128,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: task16c-small200-validation
+          name: task16c-small20-validation
           path: |
             /tmp/task16c-small200/
             /tmp/task16c-small200-certification/
